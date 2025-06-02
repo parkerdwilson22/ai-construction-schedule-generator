@@ -66,26 +66,31 @@ if st.button("Generate Schedule"):
                 if line.strip().startswith("Week"):
                     parts = line.split(":")[0].split()
                     week_num = parts[1]
-                    date_range = line.split("(")[-1].replace(")", "")
+                    date_range = line.split("(")[-1].replace(")", "") if "(" in line else ""
                     task = line.split(":")[1].strip() if ":" in line else ""
                     data.append({"Week": week_num, "Task": task, "Date Range": date_range})
-            df = pd.DataFrame(data)
-            return df
+            return pd.DataFrame(data)
 
         df = parse_schedule_to_df(output)
 
         def create_gantt(df):
-            df[['Start', 'End']] = df["Date Range"].str.split(" to ", expand=True)
-            df['Start'] = pd.to_datetime(df['Start'])
-            df['End'] = pd.to_datetime(df['End'])
-            fig = px.timeline(df, x_start="Start", x_end="End", y="Task", color="Week")
-            fig.update_yaxes(autorange="reversed")
-            return fig
+            try:
+                df[['Start', 'End']] = df["Date Range"].str.split(" to ", expand=True)
+                df['Start'] = pd.to_datetime(df['Start'], errors='coerce')
+                df['End'] = pd.to_datetime(df['End'], errors='coerce')
+                df.dropna(subset=['Start', 'End'], inplace=True)
+                fig = px.timeline(df, x_start="Start", x_end="End", y="Task", color="Week")
+                fig.update_yaxes(autorange="reversed")
+                return fig
+            except Exception as e:
+                st.error(f"Gantt chart error: {e}")
+                return None
 
         gantt = create_gantt(df)
 
         with st.expander("📊 View Gantt Chart and Download CSV"):
-            st.plotly_chart(gantt, use_container_width=True)
+            if gantt:
+                st.plotly_chart(gantt, use_container_width=True)
             csv = df.to_csv(index=False).encode('utf-8')
             st.download_button("📥 Download CSV", csv, "schedule.csv", "text/csv")
 
