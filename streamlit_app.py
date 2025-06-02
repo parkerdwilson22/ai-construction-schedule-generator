@@ -1,5 +1,5 @@
 import streamlit as st
-from datetime import datetime, timedelta
+from datetime import datetime
 from langchain_community.chat_models import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
@@ -62,13 +62,26 @@ if st.button("Generate Schedule"):
         def parse_schedule_to_df(output_text):
             data = []
             lines = output_text.split("\n")
+            current_week = None
             for line in lines:
-                if line.strip().startswith("Week"):
-                    parts = line.split(":")[0].split()
-                    week_num = parts[1]
-                    date_range = line.split("(")[-1].replace(")", "") if "(" in line else ""
-                    task = line.split(":")[1].strip() if ":" in line else ""
-                    data.append({"Week": week_num, "Task": task, "Date Range": date_range})
+                line = line.strip()
+                if line.startswith("Week") and "(" in line:
+                    try:
+                        parts = line.split("(")
+                        week_part = parts[0].strip()
+                        date_range = parts[1].replace(")", "").strip()
+                        week_num = week_part.split()[1]
+                        current_week = {"Week": week_num, "Date Range": date_range, "Task": ""}
+                    except:
+                        continue
+                elif line.startswith("-") and current_week:
+                    task = line.lstrip("-").strip()
+                    current_week["Task"] += task + "; "
+                elif line == "" and current_week:
+                    data.append(current_week)
+                    current_week = None
+            if current_week:
+                data.append(current_week)
             return pd.DataFrame(data)
 
         df = parse_schedule_to_df(output)
@@ -91,6 +104,11 @@ if st.button("Generate Schedule"):
         with st.expander("📊 View Gantt Chart and Download CSV"):
             if gantt:
                 st.plotly_chart(gantt, use_container_width=True)
+                if df.empty:
+                    st.warning("⚠️ No valid date ranges found to display in the Gantt chart.")
+            else:
+                st.warning("⚠️ Could not generate a Gantt chart from the schedule.")
+
             csv = df.to_csv(index=False).encode('utf-8')
             st.download_button("📥 Download CSV", csv, "schedule.csv", "text/csv")
 
@@ -108,3 +126,5 @@ if st.button("Generate Schedule"):
             st.success("📧 Schedule sent via email!")
         except Exception as e:
             st.error(f"Email failed: {e}")
+
+    
