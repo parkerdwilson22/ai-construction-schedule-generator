@@ -63,9 +63,13 @@ if st.button("Generate Schedule"):
             data = []
             lines = output_text.split("\n")
             current_week = None
-            for line in lines:
+
+            for i, line in enumerate(lines):
                 line = line.strip()
+
                 if line.startswith("Week") and "(" in line:
+                    if current_week:
+                        data.append(current_week)
                     try:
                         parts = line.split("(")
                         week_part = parts[0].strip()
@@ -73,15 +77,15 @@ if st.button("Generate Schedule"):
                         week_num = week_part.split()[1]
                         current_week = {"Week": week_num, "Date Range": date_range, "Task": ""}
                     except:
-                        continue
+                        current_week = None
+
                 elif line.startswith("-") and current_week:
                     task = line.lstrip("-").strip()
                     current_week["Task"] += task + "; "
-                elif line == "" and current_week:
-                    data.append(current_week)
-                    current_week = None
+
             if current_week:
                 data.append(current_week)
+
             return pd.DataFrame(data)
 
         df = parse_schedule_to_df(output)
@@ -92,7 +96,6 @@ if st.button("Generate Schedule"):
                     st.error("Gantt chart error: 'Date Range' column not found.")
                     return None
 
-                # Handle both formats: "June 1 to June 7" OR "June 1 - June 7"
                 if df["Date Range"].str.contains(" to ").any():
                     df[['Start', 'End']] = df["Date Range"].str.split(" to ", expand=True)
                 elif df["Date Range"].str.contains(" - ").any():
@@ -139,4 +142,5 @@ if st.button("Generate Schedule"):
             st.success("📧 Schedule sent via email!")
         except Exception as e:
             st.error(f"Email failed: {e}")
+
     
