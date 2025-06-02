@@ -8,6 +8,7 @@ import plotly.express as px
 import smtplib
 from email.mime.text import MIMEText
 import os
+import re
 
 st.set_page_config(page_title="AI Construction Scheduler", layout="centered")
 os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
@@ -63,21 +64,21 @@ if st.button("Generate Schedule"):
             data = []
             lines = output_text.split("\n")
             current_week = None
+            week_pattern = re.compile(r"Week\s+(\d+)\s*\(([^)]+)\)")
 
-            for i, line in enumerate(lines):
+            for line in lines:
                 line = line.strip()
 
-                if line.startswith("Week") and "(" in line:
+                # Detect week block
+                week_match = week_pattern.match(line)
+                if week_match:
                     if current_week:
                         data.append(current_week)
-                    try:
-                        parts = line.split("(")
-                        week_part = parts[0].strip()
-                        date_range = parts[1].replace(")", "").strip()
-                        week_num = week_part.split()[1]
-                        current_week = {"Week": week_num, "Date Range": date_range, "Task": ""}
-                    except:
-                        current_week = None
+                    current_week = {
+                        "Week": week_match.group(1),
+                        "Date Range": week_match.group(2),
+                        "Task": ""
+                    }
 
                 elif line.startswith("-") and current_week:
                     task = line.lstrip("-").strip()
@@ -142,5 +143,3 @@ if st.button("Generate Schedule"):
             st.success("📧 Schedule sent via email!")
         except Exception as e:
             st.error(f"Email failed: {e}")
-
-    
