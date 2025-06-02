@@ -88,10 +88,23 @@ if st.button("Generate Schedule"):
 
         def create_gantt(df):
             try:
-                df[['Start', 'End']] = df["Date Range"].str.split(" to ", expand=True)
+                if "Date Range" not in df.columns:
+                    st.error("Gantt chart error: 'Date Range' column not found.")
+                    return None
+
+                # Handle both formats: "June 1 to June 7" OR "June 1 - June 7"
+                if df["Date Range"].str.contains(" to ").any():
+                    df[['Start', 'End']] = df["Date Range"].str.split(" to ", expand=True)
+                elif df["Date Range"].str.contains(" - ").any():
+                    df[['Start', 'End']] = df["Date Range"].str.split(" - ", expand=True)
+                else:
+                    st.error("Gantt chart error: Unsupported date range format.")
+                    return None
+
                 df['Start'] = pd.to_datetime(df['Start'], errors='coerce')
                 df['End'] = pd.to_datetime(df['End'], errors='coerce')
                 df.dropna(subset=['Start', 'End'], inplace=True)
+
                 fig = px.timeline(df, x_start="Start", x_end="End", y="Task", color="Week")
                 fig.update_yaxes(autorange="reversed")
                 return fig
@@ -126,5 +139,4 @@ if st.button("Generate Schedule"):
             st.success("📧 Schedule sent via email!")
         except Exception as e:
             st.error(f"Email failed: {e}")
-
     
