@@ -3,3 +3,4 @@ openai
 langchain
 pandas
 plotly
+langchain-community
