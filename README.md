@@ -1,93 +1,99 @@
- 🏗️ AI Construction Schedule Generator
+# 🏗️ AI Construction Schedule Generator
 
-This is a Streamlit web application that uses OpenAI's GPT-3.5 Turbo to generate smart, week-by-week construction schedules based on project inputs. The app outputs a detailed construction timeline, displays a Gantt chart, allows CSV download, and sends the schedule via email.
+This is a no-code-friendly AI-powered web app that lets users generate detailed, week-by-week construction schedules using OpenAI. It includes a downloadable CSV file, an interactive Gantt chart, and automatic email delivery — all from a simple user interface.
 
----
-
-## ✨ Features
-
-- **AI-Powered Schedule Generation**: Uses OpenAI's GPT-3.5 Turbo via LangChain to generate detailed construction plans.
-- **Streamlit UI**: Clean and responsive web interface for user inputs.
-- **Gantt Chart Visualization**: Interactive task timeline with Plotly.
-- **CSV Export**: Instantly download the construction schedule in a structured format.
-- **Email Integration**: Automatically sends the schedule to a user’s email using Gmail SMTP and app passwords.
+> ✅ Built by someone with no prior tech experience using GenAI tools like OpenAI, LangChain, and Streamlit.
 
 ---
 
-## 🚀 How It Works
+## 🚀 Features
 
-1. **User enters** project name, location, duration (in weeks), and start date.
-2. The app **sends this data to OpenAI** which returns a detailed schedule.
-3. The output is:
-   - Displayed in a readable format
-   - Converted into a table using pandas
-   - Used to generate a Gantt chart via Plotly
-   - Downloadable as a CSV
-   - Emailed to the provided address
+- Collects project name, location, start date, and duration
+- Uses GPT-3.5 via LangChain to generate a structured JSON construction schedule
+- Parses and visualizes the output as an interactive Gantt chart using Plotly
+- Lets users download the schedule as a CSV file
+- Sends the full schedule to any email via Gmail SMTP
+- Hosted live on Streamlit Cloud
 
 ---
 
-## 🛠️ Tech Stack
+## 🧠 Tech Stack & Tools
 
-| Tool | Purpose |
-|------|---------|
-| Streamlit | Web UI |
-| OpenAI API | Schedule generation |
-| LangChain | Prompt orchestration |
-| Plotly | Gantt chart visualization |
-| Pandas | Data handling and CSV export |
-| smtplib + Gmail | Email delivery |
-| GitHub | Version control |
-| Streamlit Cloud | Deployment platform |
+| Tool               | Purpose                                           |
+|--------------------|---------------------------------------------------|
+| **Streamlit**      | For building and hosting the UI                   |
+| **OpenAI GPT-3.5** | For generating the schedule                       |
+| **LangChain**      | For structured prompting and response parsing     |
+| **Pandas**         | For data processing                               |
+| **Plotly**         | For Gantt chart visualization                     |
+| **SMTP (Gmail)**   | For sending the schedule via email                |
+| **Git & GitHub**   | For version control and cloud deployment          |
+| **VS Code**        | For local development                             |
+| **Streamlit Secrets** | For securely storing keys and passwords      |
 
 ---
 
-## 🔒 Secrets Configuration
+## 📦 Setup Instructions
 
-Create a `.streamlit/secrets.toml` file or add secrets in Streamlit Cloud with:
+1. **Clone this repo**
+git clone https://github.com/parkerdwilson22/ai-construction-schedule-generator.git
+cd ai-construction-schedule-generator
 
-```toml
-OPENAI_API_KEY = "your-openai-key"
+
+2. **Install dependencies**
+
+
+3. **Set up secrets**
+
+Create a file at `.streamlit/secrets.toml` and add:
+
+OPENAI_API_KEY = "your-openai-api-key"
 EMAIL_ADDRESS = "your-gmail-address"
 EMAIL_PASSWORD = "your-app-password"
-```
 
-> Ensure you’re using an **App Password** from Gmail, not your actual Gmail password.
 
----
+(Use an [App Password](https://myaccount.google.com/apppasswords) for Gmail.)
 
-## 📦 Installation (For Local Development)
+4. **Run locally**
 
-1. Clone the repository:
-```bash
-git clone https://github.com/your-username/ai-construction-schedule-generator.git
-cd ai-construction-schedule-generator
-```
+treamlit run streamlit_app.py
 
-2. Create a virtual environment:
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
-
-3. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-4. Run the app:
-```bash
-streamlit run streamlit_app.py
-```
+5. **Deploy to Streamlit Cloud**
+- Push to GitHub
+- Go to [https://streamlit.io/cloud](https://streamlit.io/cloud)
+- Connect your repo and deploy
 
 ---
 
-## 📍 Live Demo
+## 🎯 How It Works
 
-Check out the live app here: [https://ai-construction-schedule-generator.streamlit.app](https://ai-construction-schedule-generator.streamlit.app)
+1. You enter the project details in the app.
+2. LangChain formats a prompt using your input and sends it to OpenAI.
+3. OpenAI responds with structured JSON for a week-by-week construction timeline.
+4. The app parses the JSON into a DataFrame, shows a Gantt chart, and offers a CSV download.
+5. Your construction schedule is also emailed to you automatically.
 
 ---
 
-## 📬 Contact
+## ✅ Live Links
 
-Built by Parker Wilson Connect with me on [LinkedIn]https://www.linkedin.com/in/parkerdwilson/
+- 🔗 **Live App**: [ai-construction-schedule-generator.streamlit.app](https://ai-construction-schedule-generator.streamlit.app)
+- 💻 **GitHub Repo**: [github.com/parkerdwilson22/ai-construction-schedule-generator](https://github.com/parkerdwilson22/ai-construction-schedule-generator)
+- 📹 **Demo Video**: [Loom link coming soon]
+- 🧠 **Portfolio Page**: [Notion link coming soon]
+
+---
+
+## 🙌 A Note From the Creator
+
+I built this without any formal coding background — just GenAI tools, a laptop, and curiosity. If you're a recruiter or hiring manager looking for someone who can solve problems, create products, and move fast using AI, I’d love to connect.
+
+---
+
+## 📫 Contact
+
+**Parker Wilson**  
+[LinkedIn] https://www.linkedin.com/in/parkerdwilson/
+
+[Email](mailto:parkerdwilson@gmail.com)
+
