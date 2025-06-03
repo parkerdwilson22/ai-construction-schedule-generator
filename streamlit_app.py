@@ -8,7 +8,6 @@ import plotly.express as px
 import smtplib
 from email.mime.text import MIMEText
 import os
-import re
 
 st.set_page_config(page_title="AI Construction Scheduler", layout="centered")
 os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
@@ -18,23 +17,24 @@ llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.7)
 prompt = PromptTemplate(
     input_variables=["project_name", "weeks", "location", "start_date"],
     template="""
+You are an expert construction scheduler.
+
 Generate a week-by-week construction schedule for a project called 
 "{project_name}" in {location}, lasting {weeks} weeks, starting on 
 {start_date}. 
-Make the schedule very detailed. Each week's task must include specific 
-work, dependencies if any, and realistic sequencing.
-Also include the corresponding calendar dates for each week.
+
+Each week should be formatted exactly like this:
+Week 1 (YYYY-MM-DD to YYYY-MM-DD):
+- Task 1
+- Task 2
+
+Use ONLY the YYYY-MM-DD date format. Each week's date range must be valid and included.
 """
 )
 
 chain = LLMChain(llm=llm, prompt=prompt)
 
-st.markdown("""
-# 🏗️ AI Construction Schedule Generator
-
-Enter your project details below to generate a smart, week-by-week construction timeline.
-You’ll get a downloadable CSV, a Gantt chart, and the schedule via email.
-""")
+st.title("🏗️ AI Construction Schedule Generator")
 
 st.subheader("📋 Project Information")
 project_name = st.text_input("Project Name")
@@ -56,7 +56,6 @@ if st.button("Generate Schedule"):
             })
 
         st.success("✅ Schedule generated!")
-
         st.subheader("📅 Weekly Construction Schedule")
         st.text_area("Detailed Timeline", output, height=400)
 
@@ -64,21 +63,21 @@ if st.button("Generate Schedule"):
             data = []
             lines = output_text.split("\n")
             current_week = None
-            week_pattern = re.compile(r"Week\s+(\d+)\s*\(([^)]+)\)")
 
             for line in lines:
                 line = line.strip()
 
-                # Detect week block
-                week_match = week_pattern.match(line)
-                if week_match:
+                if line.startswith("Week") and "(" in line:
                     if current_week:
                         data.append(current_week)
-                    current_week = {
-                        "Week": week_match.group(1),
-                        "Date Range": week_match.group(2),
-                        "Task": ""
-                    }
+                    try:
+                        parts = line.split("(")
+                        week_part = parts[0].strip()
+                        date_range = parts[1].replace(")", "").strip()
+                        week_num = week_part.split()[1]
+                        current_week = {"Week": week_num, "Date Range": date_range, "Task": ""}
+                    except:
+                        current_week = None
 
                 elif line.startswith("-") and current_week:
                     task = line.lstrip("-").strip()
@@ -94,7 +93,7 @@ if st.button("Generate Schedule"):
         def create_gantt(df):
             try:
                 if "Date Range" not in df.columns:
-                    st.error("Gantt chart error: 'Date Range' column not found.")
+                    st.error("❌ Gantt chart error: 'Date Range' column missing.")
                     return None
 
                 if df["Date Range"].str.contains(" to ").any():
@@ -102,12 +101,16 @@ if st.button("Generate Schedule"):
                 elif df["Date Range"].str.contains(" - ").any():
                     df[['Start', 'End']] = df["Date Range"].str.split(" - ", expand=True)
                 else:
-                    st.error("Gantt chart error: Unsupported date range format.")
+                    st.warning("⚠️ Gantt chart format unrecognized. Expected 'YYYY-MM-DD to YYYY-MM-DD'.")
                     return None
 
                 df['Start'] = pd.to_datetime(df['Start'], errors='coerce')
                 df['End'] = pd.to_datetime(df['End'], errors='coerce')
                 df.dropna(subset=['Start', 'End'], inplace=True)
+
+                if df.empty:
+                    st.warning("⚠️ Gantt chart not generated. No valid date ranges found.")
+                    return None
 
                 fig = px.timeline(df, x_start="Start", x_end="End", y="Task", color="Week")
                 fig.update_yaxes(autorange="reversed")
@@ -121,8 +124,6 @@ if st.button("Generate Schedule"):
         with st.expander("📊 View Gantt Chart and Download CSV"):
             if gantt:
                 st.plotly_chart(gantt, use_container_width=True)
-                if df.empty:
-                    st.warning("⚠️ No valid date ranges found to display in the Gantt chart.")
             else:
                 st.warning("⚠️ Could not generate a Gantt chart from the schedule.")
 
@@ -143,3 +144,6 @@ if st.button("Generate Schedule"):
             st.success("📧 Schedule sent via email!")
         except Exception as e:
             st.error(f"Email failed: {e}")
+
+
+        
