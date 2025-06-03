@@ -8,35 +8,38 @@ import plotly.express as px
 import smtplib
 from email.mime.text import MIMEText
 import os
+import json
 
 st.set_page_config(page_title="AI Construction Scheduler", layout="centered")
 os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 
-llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.7)
+llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.5)
 
 prompt = PromptTemplate(
     input_variables=["project_name", "weeks", "location", "start_date"],
     template="""
-You are an expert construction scheduler.
+Generate a detailed construction schedule for a project called "{project_name}" located in {location}, lasting {weeks} weeks starting from {start_date}.
 
-Generate a week-by-week construction schedule for a project called 
-"{project_name}" in {location}, lasting {weeks} weeks, starting on 
-{start_date}. 
+Return the output as valid JSON formatted like this:
+[
+  {{
+    "week": 1,
+    "start_date": "YYYY-MM-DD",
+    "end_date": "YYYY-MM-DD",
+    "tasks": ["Task 1", "Task 2"]
+  }},
+  ...
+]
 
-Each week should be formatted exactly like this:
-Week 1 (YYYY-MM-DD to YYYY-MM-DD):
-- Task 1
-- Task 2
-
-Use ONLY the YYYY-MM-DD date format. Each week's date range must be valid and included.
+The output MUST be valid JSON. Do not include any notes or text outside the JSON block.
 """
 )
 
 chain = LLMChain(llm=llm, prompt=prompt)
 
-st.title("🏗️ AI Construction Schedule Generator")
+st.title("AI Construction Schedule Generator")
+st.subheader("Project Information")
 
-st.subheader("📋 Project Information")
 project_name = st.text_input("Project Name")
 location = st.text_input("Project Location")
 weeks = st.number_input("Project Duration (in weeks)", min_value=1, max_value=100, step=1)
@@ -45,7 +48,7 @@ email_address = st.text_input("Email to send the schedule")
 
 if st.button("Generate Schedule"):
     if not project_name or not location or not email_address:
-        st.warning("⚠️ Please fill in all fields before generating.")
+        st.warning("Please fill in all fields before generating.")
     else:
         with st.spinner("Generating schedule..."):
             output = chain.run({
@@ -55,83 +58,34 @@ if st.button("Generate Schedule"):
                 "start_date": start_date.strftime("%Y-%m-%d")
             })
 
-        st.success("✅ Schedule generated!")
-        st.subheader("📅 Weekly Construction Schedule")
-        st.text_area("Detailed Timeline", output, height=400)
+        try:
+            schedule_json = json.loads(output)
+        except Exception as e:
+            st.error(f"Failed to parse AI response as JSON: {e}")
+            st.code(output)
+            st.stop()
 
-        def parse_schedule_to_df(output_text):
-            data = []
-            lines = output_text.split("\n")
-            current_week = None
+        df = pd.DataFrame(schedule_json)
+        df['start_date'] = pd.to_datetime(df['start_date'])
+        df['end_date'] = pd.to_datetime(df['end_date'])
+        df['Week'] = df['week']
+        df['Task'] = df['tasks'].apply(lambda tasks: "; ".join(tasks))
 
-            for line in lines:
-                line = line.strip()
+        st.success("Schedule generated!")
 
-                if line.startswith("Week") and "(" in line:
-                    if current_week:
-                        data.append(current_week)
-                    try:
-                        parts = line.split("(")
-                        week_part = parts[0].strip()
-                        date_range = parts[1].replace(")", "").strip()
-                        week_num = week_part.split()[1]
-                        current_week = {"Week": week_num, "Date Range": date_range, "Task": ""}
-                    except:
-                        current_week = None
+        st.subheader("Schedule Preview")
+        st.dataframe(df[["Week", "start_date", "end_date", "Task"]])
 
-                elif line.startswith("-") and current_week:
-                    task = line.lstrip("-").strip()
-                    current_week["Task"] += task + "; "
+        st.subheader("Gantt Chart and CSV Export")
+        fig = px.timeline(df, x_start="start_date", x_end="end_date", y="Task", color="Week")
+        fig.update_yaxes(autorange="reversed")
+        st.plotly_chart(fig, use_container_width=True)
 
-            if current_week:
-                data.append(current_week)
-
-            return pd.DataFrame(data)
-
-        df = parse_schedule_to_df(output)
-
-        def create_gantt(df):
-            try:
-                if "Date Range" not in df.columns:
-                    st.error("❌ Gantt chart error: 'Date Range' column missing.")
-                    return None
-
-                if df["Date Range"].str.contains(" to ").any():
-                    df[['Start', 'End']] = df["Date Range"].str.split(" to ", expand=True)
-                elif df["Date Range"].str.contains(" - ").any():
-                    df[['Start', 'End']] = df["Date Range"].str.split(" - ", expand=True)
-                else:
-                    st.warning("⚠️ Gantt chart format unrecognized. Expected 'YYYY-MM-DD to YYYY-MM-DD'.")
-                    return None
-
-                df['Start'] = pd.to_datetime(df['Start'], errors='coerce')
-                df['End'] = pd.to_datetime(df['End'], errors='coerce')
-                df.dropna(subset=['Start', 'End'], inplace=True)
-
-                if df.empty:
-                    st.warning("⚠️ Gantt chart not generated. No valid date ranges found.")
-                    return None
-
-                fig = px.timeline(df, x_start="Start", x_end="End", y="Task", color="Week")
-                fig.update_yaxes(autorange="reversed")
-                return fig
-            except Exception as e:
-                st.error(f"Gantt chart error: {e}")
-                return None
-
-        gantt = create_gantt(df)
-
-        with st.expander("📊 View Gantt Chart and Download CSV"):
-            if gantt:
-                st.plotly_chart(gantt, use_container_width=True)
-            else:
-                st.warning("⚠️ Could not generate a Gantt chart from the schedule.")
-
-            csv = df.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 Download CSV", csv, "schedule.csv", "text/csv")
+        csv = df.to_csv(index=False).encode('utf-8')
+        st.download_button("Download CSV", csv, "schedule.csv", "text/csv")
 
         try:
-            email_content = f"Here is your AI-generated construction schedule for {project_name}:\n\n{output}"
+            email_content = f"Here is your AI-generated construction schedule for {project_name}:\n\n{df.to_string(index=False)}"
             msg = MIMEText(email_content)
             msg["Subject"] = f"Construction Schedule: {project_name}"
             msg["From"] = st.secrets["EMAIL_ADDRESS"]
@@ -141,9 +95,6 @@ if st.button("Generate Schedule"):
                 server.login(st.secrets["EMAIL_ADDRESS"], st.secrets["EMAIL_PASSWORD"])
                 server.send_message(msg)
 
-            st.success("📧 Schedule sent via email!")
+            st.success("Schedule sent via email!")
         except Exception as e:
             st.error(f"Email failed: {e}")
-
-
-        
