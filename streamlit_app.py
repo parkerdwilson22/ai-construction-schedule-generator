@@ -1,5 +1,5 @@
 import streamlit as st
-from datetime import datetime, timedelta
+from datetime import datetime
 from langchain_community.chat_models import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
@@ -16,10 +16,10 @@ os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.7)
 
 prompt = PromptTemplate(
-    input_variables=["project_name", "weeks", "location", "start_date", "include_precon"],
+    input_variables=["project_name", "weeks", "location", "start_date", "precon_instructions"],
     template="""
 Generate a detailed construction schedule for a project called "{project_name}" in {location}, lasting {weeks} weeks, starting on {start_date}.
-{include_precon} 
+{precon_instructions}
 Respond in strict JSON format as a list of weekly objects like this:
 [
   {{
@@ -27,7 +27,11 @@ Respond in strict JSON format as a list of weekly objects like this:
     "date_range": "2025-06-01 to 2025-06-07",
     "tasks": ["Excavate site", "Set up perimeter fencing"]
   }},
-  ...
+  {{
+    "week": 2,
+    "date_range": "2025-06-08 to 2025-06-14",
+    "tasks": ["Pour foundation", "Inspect footing"]
+  }}
 ]
 """
 )
@@ -35,74 +39,80 @@ Respond in strict JSON format as a list of weekly objects like this:
 chain = LLMChain(llm=llm, prompt=prompt)
 
 st.title("🏗️ AI Construction Schedule Generator")
-st.markdown("Create a detailed Gantt chart & CSV from a prompt-based construction schedule.")
+st.markdown("Generate, preview, and email editable construction schedules with optional permitting steps.")
 
 project_name = st.text_input("Project Name")
 location = st.text_input("Project Location")
 weeks = st.number_input("Project Duration (weeks)", min_value=1, max_value=100, step=1)
 start_date = st.date_input("Project Start Date", min_value=datetime.today())
-include_precon = st.checkbox("✅ Include permitting, inspections, and pre-construction tasks")
-email_address = st.text_input("Recipient Email")
+include_precon = st.checkbox("✅ Include permitting/inspection tasks?")
+email_address = st.text_input("Recipient Email (Optional – used only when sending email)")
 
 if st.button("Generate Schedule"):
-    if not project_name or not location or not email_address:
-        st.warning("⚠️ Please fill in all fields.")
+    if not project_name or not location:
+        st.warning("⚠️ Please fill in all required fields.")
     else:
         with st.spinner("Generating schedule..."):
+            precon_note = (
+                "Include pre-construction steps such as permitting, inspections, and utility setup."
+                if include_precon else ""
+            )
             prompt_input = {
                 "project_name": project_name,
                 "weeks": weeks,
                 "location": location,
                 "start_date": start_date.strftime("%Y-%m-%d"),
-                "include_precon": "Include permitting, inspections, and other common pre-construction tasks." if include_precon else ""
+                "precon_instructions": precon_note
             }
+
             output = chain.run(prompt_input)
 
         try:
             schedule = json.loads(output)
+
             df = pd.DataFrame([
                 {
-                    "Week": item["week"],
-                    "Date Range": item["date_range"],
-                    "Task": "; ".join(item["tasks"])
+                    "week": item["week"],
+                    "start_date": item["date_range"].split(" to ")[0],
+                    "end_date": item["date_range"].split(" to ")[1],
+                    "tasks": "; ".join(item["tasks"])
                 }
                 for item in schedule
             ])
 
-            st.success("✅ Schedule successfully parsed!")
+            st.success("✅ Schedule successfully generated!")
 
             st.subheader("✏️ Preview & Edit Schedule")
             edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True)
 
-            def create_gantt(df):
-                df[['Start', 'End']] = df['Date Range'].str.split(" to ", expand=True)
-                df['Start'] = pd.to_datetime(df['Start'], errors='coerce')
-                df['End'] = pd.to_datetime(df['End'], errors='coerce')
-                df.dropna(subset=['Start', 'End'], inplace=True)
-                fig = px.timeline(df, x_start="Start", x_end="End", y="Task", color="Week")
-                fig.update_yaxes(autorange="reversed")
-                return fig
+            st.subheader("📊 Gantt Chart")
+            try:
+                edited_df['Start'] = pd.to_datetime(edited_df['start_date'], errors='coerce')
+                edited_df['End'] = pd.to_datetime(edited_df['end_date'], errors='coerce')
+                gantt_fig = px.timeline(edited_df, x_start="Start", x_end="End", y="tasks", color="week")
+                gantt_fig.update_yaxes(autorange="reversed")
+                st.plotly_chart(gantt_fig, use_container_width=True)
+            except Exception as e:
+                st.warning("⚠️ Could not generate Gantt chart. Check date formatting.")
 
-            st.subheader("📊 Gantt Chart & Export Options")
-            gantt_chart = create_gantt(edited_df)
-            st.plotly_chart(gantt_chart, use_container_width=True)
+            st.download_button("📥 Download CSV", edited_df.to_csv(index=False).encode('utf-8'), "schedule.csv", "text/csv")
 
-            csv = edited_df.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 Download CSV", csv, "schedule.csv", "text/csv")
+            st.subheader("📧 Send Schedule by Email")
+            if st.button("Send Email"):
+                if not email_address:
+                    st.warning("⚠️ Please enter an email address above.")
+                else:
+                    email_body = f"Here is your edited schedule for '{project_name}':\n\n{edited_df.to_string(index=False)}"
+                    msg = MIMEText(email_body)
+                    msg["Subject"] = f"Construction Schedule for {project_name}"
+                    msg["From"] = st.secrets["EMAIL_ADDRESS"]
+                    msg["To"] = email_address
 
-            if st.button("📧 Send Email with Schedule"):
-                email_content = f"Your schedule for '{project_name}' is below:\n\n{edited_df.to_string(index=False)}"
-                msg = MIMEText(email_content)
-                msg["Subject"] = f"Construction Schedule for {project_name}"
-                msg["From"] = st.secrets["EMAIL_ADDRESS"]
-                msg["To"] = email_address
+                    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+                        server.login(st.secrets["EMAIL_ADDRESS"], st.secrets["EMAIL_PASSWORD"])
+                        server.send_message(msg)
 
-                with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-                    server.login(st.secrets["EMAIL_ADDRESS"], st.secrets["EMAIL_PASSWORD"])
-                    server.send_message(msg)
-
-                st.success("📧 Email sent successfully!")
+                    st.success("📨 Email sent successfully!")
 
         except Exception as e:
-            st.error(f"❌ Error parsing or processing schedule: {e}")
-
+            st.error(f"❌ Failed to parse or display schedule: {e}")
