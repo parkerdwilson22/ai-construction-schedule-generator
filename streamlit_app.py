@@ -9,6 +9,8 @@ import smtplib
 from email.mime.text import MIMEText
 import json
 import os
+from fpdf import FPDF
+import tempfile
 
 st.set_page_config(page_title="AI Construction Scheduler", layout="centered")
 os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
@@ -97,8 +99,7 @@ if st.session_state.schedule_data is not None:
             x_end="End", 
             y="tasks", 
             color="week", 
-            height=600,
-            title=""
+            height=600
         )
         gantt_fig.update_yaxes(autorange="reversed", title=None)
         gantt_fig.update_layout(margin=dict(l=50, r=50, t=30, b=30))
@@ -108,6 +109,36 @@ if st.session_state.schedule_data is not None:
 
     csv_data = edited_df.to_csv(index=False).encode('utf-8')
     st.download_button("📥 Download CSV", csv_data, "schedule.csv", "text/csv")
+
+    def create_pdf(df, project_name):
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial", "B", 14)
+        pdf.cell(200, 10, f"Project Schedule for {project_name}", ln=True, align="C")
+        pdf.set_font("Arial", size=10)
+        pdf.ln(5)
+
+        col_widths = [15, 30, 30, 110]
+        headers = ["Week", "Start", "End", "Tasks"]
+
+        for i, header in enumerate(headers):
+            pdf.cell(col_widths[i], 10, header, border=1)
+        pdf.ln()
+
+        for _, row in df.iterrows():
+            pdf.cell(col_widths[0], 8, str(row["week"]), border=1)
+            pdf.cell(col_widths[1], 8, str(row["start_date"]), border=1)
+            pdf.cell(col_widths[2], 8, str(row["end_date"]), border=1)
+            pdf.multi_cell(col_widths[3], 8, str(row["tasks"]), border=1)
+            pdf.ln(0)
+
+        temp_path = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+        pdf.output(temp_path.name)
+        return temp_path.name
+
+    pdf_file_path = create_pdf(edited_df, project_name)
+    with open(pdf_file_path, "rb") as f:
+        st.download_button("🧾 Download PDF", f.read(), file_name="schedule.pdf", mime="application/pdf")
 
     st.subheader("📧 Send Schedule by Email")
     if st.button("Send Email"):
