@@ -1,5 +1,5 @@
 import streamlit as st
-from datetime import datetime
+from datetime import datetime, timedelta
 from langchain_community.chat_models import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
@@ -27,11 +27,7 @@ Respond in strict JSON format as a list of weekly objects like this:
     "date_range": "2025-06-01 to 2025-06-07",
     "tasks": ["Excavate site", "Set up perimeter fencing"]
   }},
-  {{
-    "week": 2,
-    "date_range": "2025-06-08 to 2025-06-14",
-    "tasks": ["Pour foundation", "Inspect footing"]
-  }}
+  ...
 ]
 """
 )
@@ -80,10 +76,23 @@ if st.button("Generate Schedule"):
                 for item in schedule
             ])
 
+            if include_precon:
+                precon_tasks = {
+                    "week": 1,
+                    "start_date": start_date.strftime("%Y-%m-%d"),
+                    "end_date": (start_date + timedelta(days=6)).strftime("%Y-%m-%d"),
+                    "tasks": "Apply for permits; Schedule utility setup; Call city inspector"
+                }
+                df.loc[-1] = precon_tasks
+                df.index = df.index + 1
+                df.sort_index(inplace=True)
+
+            df["week"] = list(range(1, len(df) + 1))
+
             st.success("✅ Schedule successfully generated!")
 
             st.subheader("✏️ Preview & Edit Schedule")
-            edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True)
+            edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True, key="editable_table")
 
             st.subheader("📊 Gantt Chart")
             try:
@@ -95,7 +104,8 @@ if st.button("Generate Schedule"):
             except Exception as e:
                 st.warning("⚠️ Could not generate Gantt chart. Check date formatting.")
 
-            st.download_button("📥 Download CSV", edited_df.to_csv(index=False).encode('utf-8'), "schedule.csv", "text/csv")
+            csv_data = edited_df.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Download CSV", csv_data, "schedule.csv", "text/csv")
 
             st.subheader("📧 Send Schedule by Email")
             if st.button("Send Email"):
