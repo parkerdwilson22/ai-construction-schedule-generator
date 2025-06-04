@@ -7,6 +7,8 @@ import pandas as pd
 import plotly.express as px
 import smtplib
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
 import json
 import os
 from fpdf import FPDF
@@ -145,14 +147,26 @@ if st.session_state.schedule_data is not None:
         if not email_address:
             st.warning("⚠️ Please enter an email address above.")
         else:
-            email_body = f"Here is your edited schedule for '{project_name}':\n\n{edited_df.to_string(index=False)}"
-            msg = MIMEText(email_body)
+            email_body = f"Hi,\n\nAttached is your PDF schedule for '{project_name}'. Let me know if you need any changes.\n\nBest,\nAI Scheduler"
+
+            pdf_file_path = create_pdf(edited_df, project_name)
+
+            msg = MIMEMultipart()
             msg["Subject"] = f"Construction Schedule for {project_name}"
             msg["From"] = st.secrets["EMAIL_ADDRESS"]
             msg["To"] = email_address
+            msg.attach(MIMEText(email_body))
+
+            with open(pdf_file_path, "rb") as f:
+                part = MIMEApplication(f.read(), _subtype="pdf")
+                part.add_header("Content-Disposition", "attachment", filename="schedule.pdf")
+                msg.attach(part)
 
             with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
                 server.login(st.secrets["EMAIL_ADDRESS"], st.secrets["EMAIL_PASSWORD"])
                 server.send_message(msg)
 
-            st.success("📨 Email sent successfully!")
+            st.success("📨 PDF schedule emailed successfully!")
+
+
+
