@@ -142,7 +142,7 @@ if st.session_state.schedule_data is not None:
     with open(pdf_file_path, "rb") as f:
         st.download_button("🧾 Download PDF", f.read(), file_name="schedule.pdf", mime="application/pdf")
 
-    st.subheader("📧 Send Schedule by Email")
+    st.subheader("📧 Email PDF Schedule")
     if st.button("Send Email"):
         if not email_address:
             st.warning("⚠️ Please enter an email address above.")
