@@ -1,6 +1,1 @@
-streamlit
-openai
-langchain
-pandas
-plotly
-langchain-community
+fpdf==1.7.2
