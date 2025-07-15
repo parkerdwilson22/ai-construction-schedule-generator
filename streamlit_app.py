@@ -1,12 +1,18 @@
 import streamlit as st
-from datetime import datetime
+from datetime import datetime, timedelta
 from langchain_community.chat_models import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 import pandas as pd
 import plotly.express as px
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
 import json
 import os
+from fpdf import FPDF
+import tempfile
 import requests  # For Zapier webhook
 
 st.set_page_config(page_title="AI Construction Scheduler", layout="centered")
@@ -33,7 +39,7 @@ Do not repeat them later. Return the schedule in strict JSON format like this:
 
 chain = LLMChain(llm=llm, prompt=prompt)
 
-st.title("🏗️ AI Construction Schedule Generator")
+st.title("\U0001F3D7️ AI Construction Schedule Generator")
 st.markdown("Generate, preview, and send editable construction schedules tailored by project type.")
 
 project_name = st.text_input("Project Name")
@@ -41,7 +47,6 @@ location = st.text_input("Project Location")
 project_type = st.selectbox("Project Type", ["Residential", "Commercial", "Renovation", "Infrastructure"])
 weeks = st.number_input("Project Duration (weeks)", min_value=1, max_value=100, step=1)
 start_date = st.date_input("Project Start Date", min_value=datetime.today())
-email_address = st.text_input("Recipient Email (Optional – used only when sending email)")
 
 if "schedule_data" not in st.session_state:
     st.session_state.schedule_data = None
@@ -104,12 +109,13 @@ if st.session_state.schedule_data is not None:
     except Exception as e:
         st.warning("⚠️ Could not generate Gantt chart. Check date formatting.")
 
-    st.subheader("🚀 Finalize & Send")
-    if st.button("🚀 Finalize & Send"):
+    st.subheader("\U0001F680 Finalize & Send")
+    if st.button("\U0001F680 Finalize & Send"):
         try:
             df_for_zapier = edited_df.copy()
-            df_for_zapier["start_date"] = df_for_zapier["start_date"].astype(str)
-            df_for_zapier["end_date"] = df_for_zapier["end_date"].astype(str)
+            for col in ["start_date", "end_date", "Start", "End"]:
+                if col in df_for_zapier.columns:
+                    df_for_zapier[col] = df_for_zapier[col].astype(str)
 
             requests.post(
                 st.secrets["ZAPIER_WEBHOOK_URL"],
@@ -126,4 +132,5 @@ if st.session_state.schedule_data is not None:
 
         except Exception as e:
             st.error(f"❌ Error sending to Zapier: {e}")
+
 
