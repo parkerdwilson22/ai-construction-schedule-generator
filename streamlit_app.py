@@ -1,92 +1,114 @@
-from datetime import datetime, timedelta
-import pandas as pd
 import streamlit as st
-import openai
-import requests
+import pandas as pd
 import plotly.express as px
+from datetime import datetime, timedelta
+import requests
 from fpdf import FPDF
-import os
+import io
 
-# Streamlit secrets for security
-openai.api_key = st.secrets["OPENAI_API_KEY"]
-zapier_webhook_url = st.secrets["ZAPIER_WEBHOOK_URL"]
+# ----------------------------
+# Constants
+# ----------------------------
+ZAPIER_WEBHOOK_URL = "https://hooks.zapier.com/hooks/catch/23091746/u2h14yd/"
 
-# Title
-st.title("🏗️ AI Construction Schedule Generator")
+# ----------------------------
+# PDF Export Utility
+# ----------------------------
+def generate_pdf(project_name, schedule_df):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(200, 10, f"Construction Schedule: {project_name}", ln=True, align="C")
+    pdf.set_font("Arial", size=12)
 
-# User input
-project_name = st.text_input("Project Name")
-start_date = st.date_input("Start Date", value=datetime.today())
-num_weeks = st.slider("How many weeks is your schedule?", 1, 20, 10)
+    for index, row in schedule_df.iterrows():
+        pdf.cell(200, 10, f"Week {row['Week']}: {row['Start Date']} - {row['End Date']}", ln=True)
+        pdf.multi_cell(200, 10, f"Tasks: {row['Tasks']}")
 
-# Generate Schedule Button
-if st.button("Generate Schedule"):
-    with st.spinner("Generating construction schedule..."):
-        prompt = f"""
-        Create a construction schedule broken down by week for a project named '{project_name}' that lasts {num_weeks} weeks.
-        Output the schedule as a JSON list with one entry per week using this format:
-        [
-          {{"week": 1, "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD", "tasks": "Task A, Task B"}},
-          ...
-        ]
-        Assume the project starts on {start_date.strftime("%Y-%m-%d")}.
-        """
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[{{"role": "user", "content": prompt}}],
-            temperature=0.5,
-        )
-        text_output = response.choices[0].message.content.strip()
+    pdf_output = io.BytesIO()
+    pdf.output(pdf_output)
+    return pdf_output.getvalue()
+
+# ----------------------------
+# App UI
+# ----------------------------
+st.title("🚧 AI Construction Schedule Generator")
+st.markdown("Generate your construction schedule based on your project inputs.")
+
+with st.form("schedule_form"):
+    project_name = st.text_input("Project Name", "New Construction Project")
+    project_location = st.text_input("Location", "Charlotte, NC")
+    project_type = st.selectbox("Project Type", ["Residential", "Commercial", "Infrastructure"])
+    num_weeks = st.number_input("Project Duration (weeks)", min_value=1, max_value=52, value=6)
+    start_date = st.date_input("Start Date", datetime.today())
+
+    submitted = st.form_submit_button("Generate Schedule")
+
+if submitted:
+    schedule_data = []
+    for week in range(num_weeks):
+        week_start = start_date + timedelta(weeks=week)
+        week_end = week_start + timedelta(days=6)
+        tasks = f"Tasks for week {week + 1}"  # You can replace this with GPT-generated tasks later
+        schedule_data.append({
+            "Week": week + 1,
+            "Start Date": week_start,
+            "End Date": week_end,
+            "Tasks": tasks
+        })
+
+    schedule_df = pd.DataFrame(schedule_data)
+
+    st.success("✅ Schedule Generated!")
+    st.dataframe(schedule_df)
+
+    # Gantt chart
+    fig = px.timeline(
+        schedule_df,
+        x_start="Start Date",
+        x_end="End Date",
+        y="Tasks",
+        color="Week",
+        title="Construction Schedule Timeline"
+    )
+    fig.update_yaxes(autorange="reversed")
+    st.plotly_chart(fig)
+
+    st.markdown("---")
+    st.subheader("🚀 Finalize & Send")
+
+    if st.button("🚀 Finalize & Send"):
+        pdf_bytes = generate_pdf(project_name, schedule_df)
+        csv_string = schedule_df.to_csv(index=False)
+
+        zapier_payload = {
+            "project_name": project_name,
+            "location": project_location,
+            "project_type": project_type,
+            "weeks": num_weeks,
+            "start_date": start_date.strftime("%Y-%m-%d"),
+            "schedule": [
+                {
+                    "week": row["Week"],
+                    "start_date": row["Start Date"].strftime("%Y-%m-%d"),
+                    "end_date": row["End Date"].strftime("%Y-%m-%d"),
+                    "tasks": row["Tasks"]
+                }
+                for _, row in schedule_df.iterrows()
+            ],
+            "csv": csv_string,
+            "pdf_base64": pdf_bytes.decode("latin1")  # Zapier receives PDF as string
+        }
+
         try:
-            schedule_data = eval(text_output)
-        except:
-            st.error("⚠️ Error parsing GPT response. Please try again.")
-            st.stop()
-
-        df = pd.DataFrame(schedule_data)
-
-        # Show Gantt chart
-        fig = px.timeline(
-            df,
-            x_start="start_date",
-            x_end="end_date",
-            y="tasks",
-            color="week",
-            title="📊 Gantt Chart",
-        )
-        fig.update_yaxes(autorange="reversed")
-        st.plotly_chart(fig, use_container_width=True)
-
-        # Save CSV
-        csv_path = "/tmp/schedule.csv"
-        df.to_csv(csv_path, index=False)
-
-        # Save PDF
-        pdf_path = "/tmp/schedule.pdf"
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("Arial", size=12)
-        pdf.cell(200, 10, txt=f"{project_name} Schedule", ln=True, align="C")
-        for row in schedule_data:
-            pdf.cell(200, 10, txt=f"Week {row['week']}: {row['tasks']}", ln=True)
-        pdf.output(pdf_path)
-
-        st.success("✅ Schedule generated!")
-
-        if st.button("📤 Finalize & Send"):
-            with open(csv_path, "rb") as f_csv, open(pdf_path, "rb") as f_pdf:
-                response = requests.post(
-                    zapier_webhook_url,
-                    files={{
-                        "csv_file": f_csv,
-                        "pdf_file": f_pdf,
-                    }},
-                    data={{"project_name": project_name}},
-                )
+            response = requests.post(ZAPIER_WEBHOOK_URL, json=zapier_payload)
             if response.status_code == 200:
-                st.success("✅ Sent to email & automation system!")
+                st.success("✅ Schedule sent to Zapier!")
             else:
-                st.error("❌ Failed to send. Check Zapier webhook URL.")
+                st.error(f"❌ Error sending to Zapier: {response.text}")
+        except Exception as e:
+            st.error(f"❌ Exception: {e}")
+
 
 
 
