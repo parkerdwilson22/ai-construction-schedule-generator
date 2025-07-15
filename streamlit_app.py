@@ -5,15 +5,9 @@ from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 import pandas as pd
 import plotly.express as px
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from email.mime.application import MIMEApplication
 import json
 import os
-from fpdf import FPDF
-import tempfile
-import requests  # For Zapier webhook
+import requests
 
 st.set_page_config(page_title="AI Construction Scheduler", layout="centered")
 os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
@@ -39,15 +33,14 @@ Do not repeat them later. Return the schedule in strict JSON format like this:
 
 chain = LLMChain(llm=llm, prompt=prompt)
 
-st.title("🏗️ AI Construction Schedule Generator")
-st.markdown("Generate, preview, and email editable construction schedules tailored by project type.")
+st.title("\U0001F3D7️ AI Construction Schedule Generator")
+st.markdown("Generate, preview, and send editable construction schedules tailored by project type.")
 
 project_name = st.text_input("Project Name")
 location = st.text_input("Project Location")
 project_type = st.selectbox("Project Type", ["Residential", "Commercial", "Renovation", "Infrastructure"])
 weeks = st.number_input("Project Duration (weeks)", min_value=1, max_value=100, step=1)
 start_date = st.date_input("Project Start Date", min_value=datetime.today())
-email_address = st.text_input("Recipient Email (Optional – used only when sending email)")
 
 if "schedule_data" not in st.session_state:
     st.session_state.schedule_data = None
@@ -83,17 +76,6 @@ if st.button("Generate Schedule"):
             df["week"] = list(range(1, len(df) + 1))
             st.session_state.schedule_data = df
 
-            # ✅ Send data to Zapier webhook
-            zapier_url = st.secrets["ZAPIER_WEBHOOK_URL"]
-            requests.post(zapier_url, json={
-                "project_name": project_name,
-                "location": location,
-                "project_type": project_type,
-                "weeks": weeks,
-                "start_date": start_date.strftime("%Y-%m-%d"),
-                "schedule": df.to_dict(orient="records")
-            })
-
         except Exception as e:
             st.error(f"❌ Failed to parse or display schedule: {e}")
 
@@ -121,59 +103,32 @@ if st.session_state.schedule_data is not None:
     except Exception as e:
         st.warning("⚠️ Could not generate Gantt chart. Check date formatting.")
 
-    csv_data = edited_df.to_csv(index=False).encode('utf-8')
-    st.download_button("📥 Download CSV", csv_data, "schedule.csv", "text/csv")
+    st.subheader("🚀 Finalize & Send")
+    if st.button("Finalize & Send to Zapier"):
+        webhook_url = st.secrets["ZAPIER_WEBHOOK_URL"]
 
-    def create_pdf(df, project_name):
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("Arial", "B", 14)
-        pdf.cell(200, 10, f"Project Schedule for {project_name}", ln=True, align="C")
-        pdf.set_font("Arial", size=10)
-        pdf.ln(5)
+        payload = {
+            "project_name": project_name,
+            "location": location,
+            "project_type": project_type,
+            "weeks": weeks,
+            "start_date": start_date.strftime("%Y-%m-%d"),
+            "schedule": edited_df.to_dict(orient="records"),
+            "sms_reminders": [
+                {
+                    "message": f"Reminder: Task '{row['tasks']}' scheduled for Week {row['week']} at {location}.",
+                    "date": row["start_date"],
+                    "phone": "2023029250"
+                }
+                for _, row in edited_df.iterrows()
+            ]
+        }
 
-        col_widths = [15, 30, 30, 110]
-        headers = ["Week", "Start", "End", "Tasks"]
-
-        for i, header in enumerate(headers):
-            pdf.cell(col_widths[i], 10, header, border=1)
-        pdf.ln()
-
-        for _, row in df.iterrows():
-            pdf.cell(col_widths[0], 8, str(row["week"]), border=1)
-            pdf.cell(col_widths[1], 8, str(row["start_date"]), border=1)
-            pdf.cell(col_widths[2], 8, str(row["end_date"]), border=1)
-            pdf.multi_cell(col_widths[3], 8, str(row["tasks"]), border=1)
-            pdf.ln(0)
-
-        temp_path = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-        pdf.output(temp_path.name)
-        return temp_path.name
-
-    pdf_file_path = create_pdf(edited_df, project_name)
-    with open(pdf_file_path, "rb") as f:
-        st.download_button("🧾 Download PDF", f.read(), file_name="schedule.pdf", mime="application/pdf")
-
-    st.subheader("📧 Email PDF Schedule")
-    if st.button("Send Email"):
-        if not email_address:
-            st.warning("⚠️ Please enter an email address above.")
-        else:
-            email_body = f"Hi,\n\nAttached is your PDF schedule for '{project_name}'. Let me know if you need any changes.\n\nBest,\nAI Scheduler"
-
-            msg = MIMEMultipart()
-            msg["Subject"] = f"Construction Schedule for {project_name}"
-            msg["From"] = st.secrets["EMAIL_ADDRESS"]
-            msg["To"] = email_address
-            msg.attach(MIMEText(email_body))
-
-            with open(pdf_file_path, "rb") as f:
-                part = MIMEApplication(f.read(), _subtype="pdf")
-                part.add_header("Content-Disposition", "attachment", filename="schedule.pdf")
-                msg.attach(part)
-
-            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-                server.login(st.secrets["EMAIL_ADDRESS"], st.secrets["EMAIL_PASSWORD"])
-                server.send_message(msg)
-
-            st.success("📨 PDF schedule emailed successfully!")
+        try:
+            response = requests.post(webhook_url, json=payload)
+            if response.status_code == 200:
+                st.success("📤 Schedule and reminders sent to Zapier!")
+            else:
+                st.error(f"❌ Failed to send: {response.status_code}, {response.text}")
+        except Exception as e:
+            st.error(f"❌ Error sending to Zapier: {e}")
