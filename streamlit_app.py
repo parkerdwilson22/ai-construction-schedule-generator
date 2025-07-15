@@ -1,113 +1,162 @@
 import streamlit as st
+from datetime import datetime
+from langchain_community.chat_models import ChatOpenAI
+from langchain.prompts import PromptTemplate
+from langchain.chains import LLMChain
 import pandas as pd
 import plotly.express as px
-from datetime import datetime, timedelta
+import json
+import os
 import requests
-from fpdf import FPDF
-import io
 
-# ----------------------------
-# Constants
-# ----------------------------
-ZAPIER_WEBHOOK_URL = "https://hooks.zapier.com/hooks/catch/23091746/u2h14yd/"
+# Set up Streamlit
+st.set_page_config(page_title="AI Construction Scheduler", layout="centered")
+os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 
-# ----------------------------
-# PDF Export Utility
-# ----------------------------
-def generate_pdf(project_name, schedule_df):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", "B", 16)
-    pdf.cell(200, 10, f"Construction Schedule: {project_name}", ln=True, align="C")
-    pdf.set_font("Arial", size=12)
+# Set up LLM
+llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.7)
 
-    for index, row in schedule_df.iterrows():
-        pdf.cell(200, 10, f"Week {row['Week']}: {row['Start Date']} - {row['End Date']}", ln=True)
-        pdf.multi_cell(200, 10, f"Tasks: {row['Tasks']}")
+# Prompt
+prompt = PromptTemplate(
+    input_variables=["project_name", "weeks", "location", "start_date", "project_type"],
+    template="""
+Generate a detailed construction schedule for a {project_type} project called "{project_name}" in {location}, lasting {weeks} weeks, starting on {start_date}.
+Include pre-construction tasks like permitting, inspections, and utility setup in the first week. 
+Do not repeat them later. Return the schedule in strict JSON format like this:
+[
+  {{
+    "week": 1,
+    "date_range": "2025-06-01 to 2025-06-07",
+    "tasks": ["Excavate site", "Set up perimeter fencing"]
+  }},
+  ...
+]
+"""
+)
 
-    pdf_output = io.BytesIO()
-    pdf.output(pdf_output)
-    return pdf_output.getvalue()
+chain = LLMChain(llm=llm, prompt=prompt)
 
-# ----------------------------
-# App UI
-# ----------------------------
-st.title("🚧 AI Construction Schedule Generator")
-st.markdown("Generate your construction schedule based on your project inputs.")
+# UI Inputs
+st.title("🏗️ AI Construction Schedule Generator")
+st.markdown("Generate, preview, and send editable construction schedules tailored by project type.")
 
-with st.form("schedule_form"):
-    project_name = st.text_input("Project Name", "New Construction Project")
-    project_location = st.text_input("Location", "Charlotte, NC")
-    project_type = st.selectbox("Project Type", ["Residential", "Commercial", "Infrastructure"])
-    num_weeks = st.number_input("Project Duration (weeks)", min_value=1, max_value=52, value=6)
-    start_date = st.date_input("Start Date", datetime.today())
+project_name = st.text_input("Project Name")
+location = st.text_input("Project Location")
+project_type = st.selectbox("Project Type", ["Residential", "Commercial", "Renovation", "Infrastructure"])
+weeks = st.number_input("Project Duration (weeks)", min_value=1, max_value=100, step=1)
+start_date = st.date_input("Project Start Date", min_value=datetime.today())
 
-    submitted = st.form_submit_button("Generate Schedule")
+# Session state
+if "schedule_data" not in st.session_state:
+    st.session_state.schedule_data = None
 
-if submitted:
-    schedule_data = []
-    for week in range(num_weeks):
-        week_start = start_date + timedelta(weeks=week)
-        week_end = week_start + timedelta(days=6)
-        tasks = f"Tasks for week {week + 1}"  # You can replace this with GPT-generated tasks later
-        schedule_data.append({
-            "Week": week + 1,
-            "Start Date": week_start,
-            "End Date": week_end,
-            "Tasks": tasks
-        })
-
-    schedule_df = pd.DataFrame(schedule_data)
-
-    st.success("✅ Schedule Generated!")
-    st.dataframe(schedule_df)
-
-    # Gantt chart
-    fig = px.timeline(
-        schedule_df,
-        x_start="Start Date",
-        x_end="End Date",
-        y="Tasks",
-        color="Week",
-        title="Construction Schedule Timeline"
-    )
-    fig.update_yaxes(autorange="reversed")
-    st.plotly_chart(fig)
-
-    st.markdown("---")
-    st.subheader("🚀 Finalize & Send")
-
-    if st.button("🚀 Finalize & Send"):
-        pdf_bytes = generate_pdf(project_name, schedule_df)
-        csv_string = schedule_df.to_csv(index=False)
-
-        zapier_payload = {
-            "project_name": project_name,
-            "location": project_location,
-            "project_type": project_type,
-            "weeks": num_weeks,
-            "start_date": start_date.strftime("%Y-%m-%d"),
-            "schedule": [
-                {
-                    "week": row["Week"],
-                    "start_date": row["Start Date"].strftime("%Y-%m-%d"),
-                    "end_date": row["End Date"].strftime("%Y-%m-%d"),
-                    "tasks": row["Tasks"]
-                }
-                for _, row in schedule_df.iterrows()
-            ],
-            "csv": csv_string,
-            "pdf_base64": pdf_bytes.decode("latin1")  # Zapier receives PDF as string
-        }
+# Generate button
+if st.button("Generate Schedule"):
+    if not project_name or not location:
+        st.warning("⚠️ Please fill in all required fields.")
+    else:
+        with st.spinner("Generating schedule..."):
+            prompt_input = {
+                "project_name": project_name,
+                "weeks": weeks,
+                "location": location,
+                "start_date": start_date.strftime("%Y-%m-%d"),
+                "project_type": project_type
+            }
+            output = chain.run(prompt_input)
 
         try:
-            response = requests.post(ZAPIER_WEBHOOK_URL, json=zapier_payload)
+            schedule = json.loads(output)
+
+            df = pd.DataFrame([
+                {
+                    "week": item["week"],
+                    "start_date": item["date_range"].split(" to ")[0],
+                    "end_date": item["date_range"].split(" to ")[1],
+                    "tasks": "; ".join(item["tasks"])
+                }
+                for item in schedule
+            ])
+
+            df["week"] = list(range(1, len(df) + 1))
+            st.session_state.schedule_data = df
+
+        except Exception as e:
+            st.error(f"❌ Failed to parse or display schedule: {e}")
+
+# Display + Send
+if st.session_state.schedule_data is not None:
+    st.success("✅ Schedule successfully generated!")
+
+    st.subheader("✏️ Preview & Edit Schedule")
+    edited_df = st.data_editor(
+        st.session_state.schedule_data.copy(),
+        num_rows="dynamic",
+        use_container_width=True,
+        key="editable_table"
+    )
+
+    st.subheader("📊 Gantt Chart")
+    try:
+        edited_df['Start'] = pd.to_datetime(edited_df['start_date'], errors='coerce')
+        edited_df['End'] = pd.to_datetime(edited_df['end_date'], errors='coerce')
+        gantt_fig = px.timeline(
+            edited_df, 
+            x_start="Start", 
+            x_end="End", 
+            y="tasks", 
+            color="week", 
+            height=600
+        )
+        gantt_fig.update_yaxes(autorange="reversed", title=None)
+        gantt_fig.update_layout(margin=dict(l=50, r=50, t=30, b=30))
+        st.plotly_chart(gantt_fig, use_container_width=True)
+    except Exception as e:
+        st.warning("⚠️ Could not generate Gantt chart. Check date formatting.")
+
+    st.subheader("🚀 Finalize & Send")
+    if st.button("🚀 Finalize & Send"):
+        try:
+            df_for_zapier = edited_df.copy()
+
+            # Convert columns to string
+            for col in ["start_date", "end_date", "Start", "End"]:
+                if col in df_for_zapier.columns:
+                    df_for_zapier[col] = df_for_zapier[col].astype(str)
+
+            # Final clean schedule array
+            schedule_payload = [
+                {
+                    "week": int(row["week"]),
+                    "start_date": row["start_date"],
+                    "end_date": row["end_date"],
+                    "tasks": row["tasks"]
+                }
+                for _, row in df_for_zapier.iterrows()
+            ]
+
+            payload = {
+                "project_name": project_name,
+                "location": location,
+                "project_type": project_type,
+                "weeks": weeks,
+                "start_date": start_date.strftime("%Y-%m-%d"),
+                "schedule": schedule_payload  # ✅ This will show as a single "schedule" list in Zapier
+            }
+
+            response = requests.post(
+                st.secrets["ZAPIER_WEBHOOK_URL"],
+                json=payload
+            )
+
             if response.status_code == 200:
                 st.success("✅ Schedule sent to Zapier!")
             else:
-                st.error(f"❌ Error sending to Zapier: {response.text}")
+                st.error(f"❌ Zapier Error: {response.text}")
+
         except Exception as e:
-            st.error(f"❌ Exception: {e}")
+            st.error(f"❌ Error sending to Zapier: {e}")
+
 
 
 
