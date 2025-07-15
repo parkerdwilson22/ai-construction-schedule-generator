@@ -13,7 +13,7 @@ import json
 import os
 from fpdf import FPDF
 import tempfile
-import requests  # For Zapier webhook
+import requests
 
 st.set_page_config(page_title="AI Construction Scheduler", layout="centered")
 os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
@@ -117,7 +117,7 @@ if st.session_state.schedule_data is not None:
                 if col in df_for_zapier.columns:
                     df_for_zapier[col] = df_for_zapier[col].astype(str)
 
-            # ✅ FIXED: Send schedule as array of objects for Zapier
+            # ✅ KEY FIX: Proper JSON array of objects for Zapier looping
             requests.post(
                 st.secrets["ZAPIER_WEBHOOK_URL"],
                 json={
