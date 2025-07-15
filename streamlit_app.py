@@ -94,15 +94,22 @@ if st.session_state.schedule_data is not None:
     try:
         edited_df['Start'] = pd.to_datetime(edited_df['start_date'], errors='coerce')
         edited_df['End'] = pd.to_datetime(edited_df['end_date'], errors='coerce')
+
         gantt_fig = px.timeline(
-            edited_df, 
-            x_start="Start", 
-            x_end="End", 
-            y="tasks", 
-            color="week", 
+            edited_df,
+            x_start="Start",
+            x_end="End",
+            y=edited_df.index,  # Use index to straighten layout
+            color="week",
+            hover_data=["tasks"],
             height=600
         )
-        gantt_fig.update_yaxes(autorange="reversed", title=None)
+        gantt_fig.update_yaxes(
+            tickvals=list(edited_df.index),
+            ticktext=edited_df["tasks"],
+            title=None,
+            autorange="reversed"
+        )
         gantt_fig.update_layout(margin=dict(l=50, r=50, t=30, b=30))
         st.plotly_chart(gantt_fig, use_container_width=True)
     except Exception as e:
@@ -126,13 +133,14 @@ if st.session_state.schedule_data is not None:
                     "project_type": project_type,
                     "weeks": weeks,
                     "start_date": start_date.strftime("%Y-%m-%d"),
-                    "schedule": schedule_payload  # ✅ <== KEY FIX
+                    "schedule": schedule_payload
                 }
             )
             st.success("✅ Schedule sent to Zapier!")
 
         except Exception as e:
             st.error(f"❌ Error sending to Zapier: {e}")
+
 
 
 
