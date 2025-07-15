@@ -4,3 +4,30 @@ venv
 .streamlit/secrets.toml
 .env
 venv/
+# Python
+__pycache__/
+*.py[cod]
+*.egg
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# VS Code settings
+.vscode/
+
+# Streamlit secrets
+.streamlit/secrets.toml
+
+# OS files
+.DS_Store
+
+# Logs and cache
+*.log
+*.sqlite3
+.cache/
+

@@ -13,6 +13,7 @@ import json
 import os
 from fpdf import FPDF
 import tempfile
+import requests  # For Zapier webhook
 
 st.set_page_config(page_title="AI Construction Scheduler", layout="centered")
 os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
@@ -82,6 +83,17 @@ if st.button("Generate Schedule"):
             df["week"] = list(range(1, len(df) + 1))
             st.session_state.schedule_data = df
 
+            # ✅ Send data to Zapier webhook
+            zapier_url = st.secrets["ZAPIER_WEBHOOK_URL"]
+            requests.post(zapier_url, json={
+                "project_name": project_name,
+                "location": location,
+                "project_type": project_type,
+                "weeks": weeks,
+                "start_date": start_date.strftime("%Y-%m-%d"),
+                "schedule": df.to_dict(orient="records")
+            })
+
         except Exception as e:
             st.error(f"❌ Failed to parse or display schedule: {e}")
 
@@ -149,8 +161,6 @@ if st.session_state.schedule_data is not None:
         else:
             email_body = f"Hi,\n\nAttached is your PDF schedule for '{project_name}'. Let me know if you need any changes.\n\nBest,\nAI Scheduler"
 
-            pdf_file_path = create_pdf(edited_df, project_name)
-
             msg = MIMEMultipart()
             msg["Subject"] = f"Construction Schedule for {project_name}"
             msg["From"] = st.secrets["EMAIL_ADDRESS"]
@@ -167,7 +177,3 @@ if st.session_state.schedule_data is not None:
                 server.send_message(msg)
 
             st.success("📨 PDF schedule emailed successfully!")
-
-
-
-
