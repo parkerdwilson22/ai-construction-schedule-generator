@@ -1,19 +1,13 @@
 import streamlit as st
-from datetime import datetime, timedelta
+from datetime import datetime
 from langchain_community.chat_models import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 import pandas as pd
 import plotly.express as px
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from email.mime.application import MIMEApplication
-import json
 import os
-from fpdf import FPDF
-import tempfile
-import requests
+import json
+import requests  # For Zapier webhook
 
 st.set_page_config(page_title="AI Construction Scheduler", layout="centered")
 os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
@@ -89,7 +83,12 @@ if st.session_state.schedule_data is not None:
     st.success("✅ Schedule successfully generated!")
 
     st.subheader("✏️ Preview & Edit Schedule")
-    edited_df = st.data_editor(st.session_state.schedule_data.copy(), num_rows="dynamic", use_container_width=True, key="editable_table")
+    edited_df = st.data_editor(
+        st.session_state.schedule_data.copy(),
+        num_rows="dynamic",
+        use_container_width=True,
+        key="editable_table"
+    )
 
     st.subheader("📊 Gantt Chart")
     try:
@@ -117,7 +116,8 @@ if st.session_state.schedule_data is not None:
                 if col in df_for_zapier.columns:
                     df_for_zapier[col] = df_for_zapier[col].astype(str)
 
-            # ✅ KEY FIX: Proper JSON array of objects for Zapier looping
+            schedule_payload = df_for_zapier.to_dict(orient="records")  # <== THE FIX
+
             requests.post(
                 st.secrets["ZAPIER_WEBHOOK_URL"],
                 json={
@@ -126,13 +126,14 @@ if st.session_state.schedule_data is not None:
                     "project_type": project_type,
                     "weeks": weeks,
                     "start_date": start_date.strftime("%Y-%m-%d"),
-                    "schedule": df_for_zapier[["week", "start_date", "end_date", "tasks"]].to_dict(orient="records")
+                    "schedule": schedule_payload  # <== THIS IS THE IMPORTANT CHANGE
                 }
             )
             st.success("✅ Schedule sent to Zapier!")
 
         except Exception as e:
             st.error(f"❌ Error sending to Zapier: {e}")
+
 
 
 
