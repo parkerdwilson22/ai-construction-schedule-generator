@@ -1,3 +1,5 @@
+import smtplib
+from email.message import EmailMessage
 import streamlit as st
 from datetime import datetime
 from langchain_community.chat_models import ChatOpenAI
@@ -226,6 +228,30 @@ if st.session_state.schedule_data is not None:
     pdf_buffer = create_pdf(edited_df, st.session_state.estimated_cost)
     st.download_button("Download Schedule (PDF)", pdf_buffer, file_name="schedule.pdf", mime="application/pdf")
 
+    with st.expander("Send to Email"):
+    email = st.text_input("Recipient Email")
+    if st.button("Send Schedule via Email"):
+        if email:
+            send_email_with_pdf(email, pdf_buffer)
+            st.success(f"Schedule sent to {email}")
+        else:
+            st.warning("Please enter an email address.")
+
+
+def send_email_with_pdf(to_email, pdf_buffer):
+    msg = EmailMessage()
+    msg["Subject"] = "Your AI Construction Schedule (Beta)"
+    msg["From"] = st.secrets["EMAIL_ADDRESS"]
+    msg["To"] = to_email
+    msg.set_content("Attached is your AI-generated construction schedule.\n\nThis is a beta feature. Please verify with your team before use.")
+
+    # Attach PDF
+    msg.add_attachment(pdf_buffer.read(), maintype="application", subtype="pdf", filename="schedule.pdf")
+
+    # Send
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+        smtp.login(st.secrets["EMAIL_ADDRESS"], st.secrets["EMAIL_PASSWORD"])
+        smtp.send_message(msg)
 
 
 
