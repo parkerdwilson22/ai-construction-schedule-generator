@@ -1,5 +1,5 @@
 import streamlit as st
-from datetime import datetime
+from datetime import datetime, timedelta
 from langchain_community.chat_models import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
@@ -12,22 +12,42 @@ from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 from reportlab.lib import colors
 
+# -------------------------
+# PAGE CONFIG
+# -------------------------
 st.set_page_config(page_title="AI Construction Scheduler", layout="centered")
 os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 
+# -------------------------
+# LLM SETUP
+# -------------------------
 llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.7)
 
+# -------------------------
+# PROMPTS
+# -------------------------
 prompt = PromptTemplate(
     input_variables=["project_name", "weeks", "location", "start_date", "project_type"],
     template="""
-Generate a detailed construction schedule for a {project_type} project called "{project_name}" in {location}, lasting {weeks} weeks, starting on {start_date}.
-Include pre-construction tasks like permitting, inspections, and utility setup in the first week. 
-Do not repeat them later. Return the schedule in strict JSON format like this:
+You are an expert residential construction scheduler.
+Generate a detailed week-by-week construction schedule for a {project_type} project 
+(could be a new single-family home, townhouse, or small-scale residential renovation) 
+called "{project_name}" in {location}, lasting {weeks} weeks, starting on {start_date}.
+
+This schedule must ONLY be for **residential or residential renovation** projects — 
+no commercial, no infrastructure, no high-rise.
+
+Include:
+- Pre-construction tasks in week 1 (permits, inspections, utility setup) but do NOT repeat them.
+- Logical sequencing of residential build steps (site work, foundation, framing, MEP rough-ins, finishes, inspections).
+- Tasks should be practical and realistic for small to mid-scale residential work.
+
+Return ONLY in strict JSON format:
 [
   {{
     "week": 1,
-    "date_range": "2025-06-01 to 2025-06-07",
-    "tasks": ["Excavate site", "Set up perimeter fencing"]
+    "date_range": "YYYY-MM-DD to YYYY-MM-DD",
+    "tasks": ["Task 1", "Task 2", "Task 3"]
   }},
   ...
 ]
@@ -37,13 +57,13 @@ Do not repeat them later. Return the schedule in strict JSON format like this:
 materials_prompt = PromptTemplate(
     input_variables=["tasks"],
     template="""
-For the following construction tasks:
+For the following residential construction tasks:
 {tasks}
 Generate a short materials list for each task in JSON format like this:
 [
   {{
-    "task": "Excavate site",
-    "materials": ["Excavator rental", "Safety barriers", "Dump truck service"]
+    "task": "Example Task",
+    "materials": ["Material 1", "Material 2", "Material 3"]
   }},
   ...
 ]
@@ -53,20 +73,27 @@ Generate a short materials list for each task in JSON format like this:
 chain = LLMChain(llm=llm, prompt=prompt)
 materials_chain = LLMChain(llm=llm, prompt=materials_prompt)
 
-st.title("\U0001F3D7️ AI Construction Schedule Generator")
-st.markdown("Generate, preview, and download editable construction schedules tailored by project type.")
+# -------------------------
+# UI ELEMENTS
+# -------------------------
+st.title("\U0001F3D7️ AI Residential Construction Schedule Generator")
+st.markdown("Generate, preview, and download editable schedules for residential and renovation projects.")
 
 project_name = st.text_input("Project Name")
 location = st.text_input("Project Location")
-project_type = st.selectbox("Project Type", ["Residential", "Commercial", "Renovation", "Infrastructure"])
+project_type = st.selectbox("Project Type", ["Residential", "Renovation"])
 weeks = st.number_input("Project Duration (weeks)", min_value=1, max_value=100, step=1)
 start_date = st.date_input("Project Start Date", min_value=datetime.today())
 
+# Session state
 if "schedule_data" not in st.session_state:
     st.session_state.schedule_data = None
 if "materials_data" not in st.session_state:
     st.session_state.materials_data = None
 
+# -------------------------
+# GENERATE SCHEDULE
+# -------------------------
 if st.button("Generate Schedule"):
     if not project_name or not location:
         st.warning("⚠️ Please fill in all required fields.")
@@ -83,6 +110,17 @@ if st.button("Generate Schedule"):
 
         try:
             schedule = json.loads(output)
+
+            # Fix for schedules that return fewer than requested weeks
+            if len(schedule) < weeks:
+                for w in range(len(schedule) + 1, weeks + 1):
+                    week_start = start_date + timedelta(weeks=w - 1)
+                    week_end = week_start + timedelta(days=6)
+                    schedule.append({
+                        "week": w,
+                        "date_range": f"{week_start.strftime('%Y-%m-%d')} to {week_end.strftime('%Y-%m-%d')}",
+                        "tasks": ["[Add your tasks here]"]
+                    })
 
             df = pd.DataFrame([
                 {
@@ -111,6 +149,9 @@ if st.button("Generate Schedule"):
         except Exception as e:
             st.error(f"❌ Failed to parse or display schedule: {e}")
 
+# -------------------------
+# DISPLAY + DOWNLOADS
+# -------------------------
 if st.session_state.schedule_data is not None:
     st.success("✅ Schedule successfully generated!")
 
@@ -140,7 +181,7 @@ if st.session_state.schedule_data is not None:
     except Exception as e:
         st.warning("⚠️ Could not generate Gantt chart. Check date formatting.")
 
-    # Materials Order Preview Feature
+    # Materials Order Preview
     if st.session_state.materials_data is not None:
         st.subheader("🛠 Materials Order Preview")
         edited_materials_df = st.data_editor(
@@ -150,7 +191,6 @@ if st.session_state.schedule_data is not None:
             key="editable_materials"
         )
 
-        # Download Materials CSV
         materials_csv = edited_materials_df.to_csv(index=False).encode("utf-8")
         st.download_button(
             "📥 Download Materials List (CSV)",
@@ -195,6 +235,7 @@ if st.session_state.schedule_data is not None:
         file_name="schedule.pdf",
         mime="application/pdf"
     )
+
 
 
 
