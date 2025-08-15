@@ -16,16 +16,14 @@ from reportlab.lib.styles import getSampleStyleSheet
 # ----------------------------
 # App Config & Keys
 # ----------------------------
-st.set_page_config(page_title="AI Construction Scheduler", layout="centered")
+st.set_page_config(page_title="AI Construction Schedule Generator", layout="centered")
 os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 
 # ----------------------------
-# LLM Setup
+# LLM Setup (LangChain)
 # ----------------------------
 llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.4)
 
-# We now ask the LLM only for tasks per week (NOT dates),
-# and we give it cost context so it sequences with budget awareness.
 schedule_prompt = PromptTemplate(
     input_variables=[
         "project_name", "weeks", "location", "start_date",
@@ -51,9 +49,9 @@ Constraints & style:
 - Keep tasks practical and descriptive for field use.
 - Include pre-construction items (permits, utility setup) in week 1 only; do not repeat later.
 - Balance trades (framing, MEP rough-ins, inspections, drywall, finishes, punch).
-- Use budget-aware sequencing: you can assume estimated build cost range is ${cost_low}–${cost_high} total
+- Use budget-aware sequencing: assume estimated build cost range is ${cost_low}–${cost_high} total
   (based on ~{square_footage} sq ft × {stories} stories).
-- Keep material lead-time awareness in mind in the task names (e.g., "Order windows (6–8 week lead)").
+- Consider lead times in task names when relevant (e.g., "Order windows (6–8 week lead)").
 
 Return ONLY the JSON array. Do not include date ranges (the app will compute dates).
 """
@@ -80,17 +78,51 @@ schedule_chain = LLMChain(llm=llm, prompt=schedule_prompt)
 materials_chain = LLMChain(llm=llm, prompt=materials_prompt)
 
 # ----------------------------
-# Cost Estimation
+# Cost Estimation (no region multipliers)
 # ----------------------------
 def estimate_cost(square_footage, stories, project_type):
-    # Simple, conservative ranges; adjust anytime.
     multipliers = {
-        "Residential": (150, 250),  # $/sq ft
-        "Renovation": (80, 150)
+        "Residential": (140, 300),   # USD per sq ft (new build)
+        "Renovation": (80, 150)      # USD per sq ft (mid-range flip/rehab)
     }
     low, high = multipliers[project_type]
     total_sq_ft = square_footage * stories
     return int(total_sq_ft * low), int(total_sq_ft * high)
+
+# ----------------------------
+# Materials Fallback Logic
+# ----------------------------
+def materials_fallback_from_tasks(task_list):
+    """Rule-based mapping so preview never comes back empty."""
+    rows = []
+    for t in task_list:
+        tl = (t or "").lower()
+        if any(k in tl for k in ["excav", "grading", "site prep"]):
+            mats = ["Excavator rental", "Dump fees", "Safety fencing"]
+        elif any(k in tl for k in ["foundation", "footing", "slab", "concrete"]):
+            mats = ["Concrete", "Rebar", "Vapor barrier", "Formwork"]
+        elif "framing" in tl:
+            mats = ["Lumber", "Joist hangers", "Nails"]
+        elif any(k in tl for k in ["roof", "shingle"]):
+            mats = ["Shingles", "Felt", "Flashing", "Drip edge"]
+        elif any(k in tl for k in ["window", "door"]):
+            mats = ["Windows/doors", "Shims", "Foam", "Flashing tape"]
+        elif any(k in tl for k in ["plumb", "hvac", "electrical", "mech"]):
+            mats = ["Rough-in fixtures", "Conduit/pipe", "Wire/duct"]
+        elif "drywall" in tl:
+            mats = ["Drywall sheets", "Joint compound", "Tape"]
+        elif any(k in tl for k in ["tile", "floor"]):
+            mats = ["Tile/wood/laminate", "Mortar/underlayment", "Trim pieces"]
+        elif "paint" in tl:
+            mats = ["Primer", "Interior paint", "Brushes/rollers"]
+        elif any(k in tl for k in ["cabinet", "counter"]):
+            mats = ["Cabinets", "Countertops", "Hardware"]
+        elif any(k in tl for k in ["fixture", "finish"]):
+            mats = ["Lighting fixtures", "Plumbing trim", "Switch/cover plates"]
+        else:
+            mats = ["General building materials"]
+        rows.append({"task": t, "materials": "; ".join(mats)})
+    return pd.DataFrame(rows)
 
 # ----------------------------
 # PDF Export
@@ -129,9 +161,7 @@ def create_pdf(schedule_df, project_name, location, project_type, sf, stories, e
 
     # Schedule table
     sched_cols = ["week", "start_date", "end_date", "tasks"]
-    tbl_data = [sched_cols] + schedule_df[sched_cols].values.tolist()
-    # Convert all table cells to strings (ReportLab needs serializable)
-    tbl_data = [[str(cell) for cell in row] for row in tbl_data]
+    tbl_data = [sched_cols] + schedule_df[sched_cols].astype(str).values.tolist()
 
     schedule_table = Table(tbl_data, repeatRows=1)
     schedule_table.setStyle(TableStyle([
@@ -148,7 +178,7 @@ def create_pdf(schedule_df, project_name, location, project_type, sf, stories, e
 
     disclaimer = Paragraph(
         "<font color='red'><i>Disclaimer:</i> This schedule and cost range are AI-generated rough guidance. "
-        "Verify all dates, quantities, and costs with your team and vendors before ordering or scheduling.</font>",
+        "They do not constitute a bid or contract. Verify all dates, quantities, and costs with your team and vendors.</font>",
         styles["Italic"]
     )
     elements.append(disclaimer)
@@ -161,15 +191,15 @@ def create_pdf(schedule_df, project_name, location, project_type, sf, stories, e
 # UI
 # ----------------------------
 st.title("🏗️ AI Construction Schedule Generator")
-st.markdown("Generate, preview, and download editable construction schedules tailored for **Residential** and **Renovation** projects.")
+st.markdown("For **Residential** and **Renovation** projects. Generate a schedule, preview materials, and download CSV/PDF.")
 
 project_name = st.text_input("Project Name")
 location = st.text_input("Project Location")
-project_type = st.selectbox("Project Type", ["Residential", "Renovation"])  # narrowed focus
+project_type = st.selectbox("Project Type", ["Residential", "Renovation"])
 weeks = st.number_input("Project Duration (weeks)", min_value=1, max_value=100, step=1)
 start_date = st.date_input("Project Start Date", min_value=datetime.today())
 
-# New cost inputs
+# Cost inputs
 square_footage = st.number_input("Total Square Footage", min_value=100, max_value=20000, step=50)
 stories = st.number_input("Number of Stories", min_value=1, max_value=5, step=1)
 
@@ -185,7 +215,6 @@ if st.button("Generate Schedule"):
     if not project_name or not location:
         st.warning("⚠️ Please fill in all required fields.")
     else:
-        # Estimate cost range to feed context to the LLM
         cost_low, cost_high = estimate_cost(square_footage, stories, project_type)
 
         with st.spinner("Generating schedule..."):
@@ -209,7 +238,6 @@ if st.button("Generate Schedule"):
             # Build DataFrame with exact weeks + computed dates
             rows = []
             for i in range(1, int(weeks) + 1):
-                # Find tasks for this week in LLM output; fallback to empty list
                 wk_entry = next((w for w in weeks_json if int(w.get("week", -1)) == i), {"tasks": []})
                 wk_start = start_date + timedelta(weeks=i - 1)
                 wk_end = wk_start + timedelta(days=6)
@@ -223,21 +251,30 @@ if st.button("Generate Schedule"):
             df = pd.DataFrame(rows)
             st.session_state.schedule_data = df
 
-            # Materials preview
+            # Materials preview (LLM first, then fallback)
             all_tasks = []
             for entry in weeks_json:
                 all_tasks.extend(entry.get("tasks", []))
-            # Only ask LLM if we actually have tasks
+
+            materials_df = pd.DataFrame(columns=["task", "materials"])
             if all_tasks:
-                materials_raw = materials_chain.run({"tasks": "\n".join(all_tasks)})
-                materials_json = json.loads(materials_raw)
-                materials_df = pd.DataFrame([
-                    {"task": item.get("task", ""), "materials": "; ".join(item.get("materials", []))}
-                    for item in materials_json
-                ])
-                st.session_state.materials_data = materials_df
+                try:
+                    materials_raw = materials_chain.run({"tasks": "\n".join(all_tasks)})
+                    materials_json = json.loads(materials_raw)
+                    materials_df = pd.DataFrame([
+                        {"task": item.get("task", ""), "materials": "; ".join(item.get("materials", []))}
+                        for item in materials_json
+                    ])
+                except Exception:
+                    materials_df = materials_fallback_from_tasks(all_tasks)
             else:
-                st.session_state.materials_data = pd.DataFrame(columns=["task", "materials"])
+                # No tasks from LLM? Fallback from the schedule dataframe
+                flat_tasks = []
+                for t in df["tasks"].tolist():
+                    flat_tasks.extend([s.strip() for s in (t or "").split(";") if s.strip()])
+                materials_df = materials_fallback_from_tasks(flat_tasks)
+
+            st.session_state.materials_data = materials_df
 
         except Exception as e:
             st.error(f"❌ Failed to parse or display schedule: {e}")
@@ -250,10 +287,10 @@ if st.session_state.schedule_data is not None:
 
     st.success("✅ Schedule successfully generated!")
 
-    # Show cost estimate
+    # Show cost estimate + disclaimers
     c_low, c_high = estimate_cost(square_footage, stories, project_type)
     st.markdown(f"💰 **Estimated Build Cost:** ${c_low:,.0f} – ${c_high:,.0f} USD")
-    st.caption("This is a rough AI-generated estimate. Please verify with actual supplier and contractor quotes.")
+    st.caption("AI-generated rough estimate. Not a bid or contract. Verify with suppliers and subcontractors.")
 
     # Editable schedule table
     st.subheader("✏️ Preview & Edit Schedule")
@@ -264,7 +301,7 @@ if st.session_state.schedule_data is not None:
         key="editable_table"
     )
 
-    # Gantt Chart (keep layout consistent)
+    # Gantt Chart
     st.subheader("📊 Gantt Chart")
     try:
         gantt_df = edited_df.copy()
@@ -284,9 +321,9 @@ if st.session_state.schedule_data is not None:
     except Exception:
         st.warning("⚠️ Could not generate Gantt chart. Check date formatting.")
 
-    # Materials Order Preview
-    if st.session_state.materials_data is not None:
-        st.subheader("🛠 Materials Order Preview")
+    # Materials Order Preview (guaranteed to show with fallback)
+    st.subheader("🛠 Materials Order Preview")
+    if st.session_state.materials_data is not None and not st.session_state.materials_data.empty:
         edited_materials_df = st.data_editor(
             st.session_state.materials_data.copy(),
             num_rows="dynamic",
@@ -301,6 +338,8 @@ if st.session_state.schedule_data is not None:
             "materials_list.csv",
             "text/csv"
         )
+    else:
+        st.info("No materials suggested yet. Add tasks above and regenerate to see a preview.")
 
     # Schedule CSV
     csv = edited_df.to_csv(index=False).encode("utf-8")
