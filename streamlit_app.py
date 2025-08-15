@@ -13,106 +13,95 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 
-st.set_page_config(page_title="AI Construction Scheduler (Beta)", layout="wide")
+# Basic config
+st.set_page_config(page_title="AI Construction Scheduler", layout="centered")
 os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
-
-# Inject light styling
-def set_styles():
-    st.markdown("""
-        <style>
-        .block-container {
-            padding-top: 2rem;
-            padding-bottom: 2rem;
-        }
-        .stDownloadButton button {
-            background-color: #2E86AB;
-            color: white;
-            font-weight: 500;
-        }
-        .stButton button {
-            background-color: #2E86AB;
-            color: white;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-
-set_styles()
-
 llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.7)
 
-prompt = PromptTemplate(
-    input_variables=["project_name", "weeks", "location", "start_date", "project_type", "square_footage", "stories"],
+# Prompt for Schedule
+schedule_prompt = PromptTemplate(
+    input_variables=["project_name", "weeks", "location", "start_date", "project_type", "square_feet", "num_stories"],
     template="""
-Generate a detailed construction schedule for a {project_type} project called "{project_name}" in {location}, lasting {weeks} weeks, starting on {start_date}. This project is {square_footage} sqft with {stories} stories.
+You're an assistant helping a small-scale residential or renovation developer. Generate a detailed schedule for a {project_type} project called "{project_name}" in {location}, lasting {weeks} weeks, starting on {start_date}.
 
-Assume typical construction workflows for {project_type.lower()} developers. Include pre-construction tasks like permitting and inspections early. Return JSON format like:
+The project is approximately {square_feet} sq ft and has {num_stories} stories.
+
+Only generate {weeks} weeks worth of schedule.
+
+Include:
+- Pre-construction in Week 1 (permitting, utility setup, inspections).
+- Clearly organized weekly tasks.
+- Don't repeat tasks across weeks.
+
+Return strict JSON format:
 [
   {{
     "week": 1,
     "date_range": "2025-06-01 to 2025-06-07",
-    "tasks": ["Excavate site", "Stake layout"]
+    "tasks": ["Excavate site", "Set up perimeter fencing"]
   }},
   ...
 ]
-
-Also provide a rough build cost estimate using ${"70" if project_type == "Renovation" else "140"}–${"70" if project_type == "Renovation" else "300"} per sqft range.
-Return only JSON.
 """
 )
 
+# Prompt for Materials
 materials_prompt = PromptTemplate(
     input_variables=["tasks"],
     template="""
-For the following construction tasks:
+For the following residential or renovation construction tasks:
 {tasks}
-Generate a materials list in JSON format:
+Generate a materials list for each task. Return strict JSON:
 [
   {{
     "task": "Excavate site",
-    "materials": ["Excavator rental", "Safety fencing"]
+    "materials": ["Excavator rental", "Safety barriers", "Dump truck service"]
   }},
   ...
-] — leave materials as '[Add materials]' if unclear.
+]
 """
 )
 
-chain = LLMChain(llm=llm, prompt=prompt)
+schedule_chain = LLMChain(llm=llm, prompt=schedule_prompt)
 materials_chain = LLMChain(llm=llm, prompt=materials_prompt)
 
-st.title("AI Construction Scheduler (Beta)")
-st.markdown("Designed for residential and renovation developers. Quickly generate build schedules, cost estimates, and material previews.")
+# UI Input
+st.title("AI Construction Schedule Generator")
+st.markdown("Generate and preview residential or renovation construction schedules.")
 
 project_name = st.text_input("Project Name")
 location = st.text_input("Project Location")
 project_type = st.selectbox("Project Type", ["Residential", "Renovation"])
-weeks = st.number_input("Project Duration (weeks)", min_value=1, max_value=52)
-square_footage = st.number_input("Estimated Square Footage", min_value=200)
-stories = st.number_input("Number of Stories", min_value=1, max_value=4)
-start_date = st.date_input("Start Date", min_value=datetime.today())
+square_feet = st.number_input("Square Footage", min_value=100)
+num_stories = st.number_input("Number of Stories", min_value=1)
+weeks = st.number_input("Project Duration (weeks)", min_value=1, max_value=100, step=1)
+start_date = st.date_input("Project Start Date", min_value=datetime.today())
 
 if "schedule_data" not in st.session_state:
     st.session_state.schedule_data = None
 if "materials_data" not in st.session_state:
     st.session_state.materials_data = None
 
+# Trigger Generator
 if st.button("Generate Schedule"):
     if not project_name or not location:
         st.warning("Please fill in all required fields.")
     else:
-        with st.spinner("Generating schedule and cost estimate..."):
+        with st.spinner("Generating schedule..."):
             inputs = {
                 "project_name": project_name,
                 "weeks": weeks,
                 "location": location,
                 "start_date": start_date.strftime("%Y-%m-%d"),
                 "project_type": project_type,
-                "square_footage": square_footage,
-                "stories": stories
+                "square_feet": square_feet,
+                "num_stories": num_stories,
             }
-            output = chain.run(inputs)
+            output = schedule_chain.run(inputs)
 
         try:
             schedule = json.loads(output)
+
             df = pd.DataFrame([
                 {
                     "week": item["week"],
@@ -122,9 +111,16 @@ if st.button("Generate Schedule"):
                 }
                 for item in schedule
             ])
-
             df["week"] = list(range(1, len(df) + 1))
             st.session_state.schedule_data = df
+
+            # Estimate cost
+            if project_type == "Residential":
+                cost_estimate = square_feet * 175
+            else:  # Renovation
+                cost_estimate = square_feet * 120
+
+            st.session_state.estimated_cost = cost_estimate
 
             # Materials
             task_list = [task for item in schedule for task in item["tasks"]]
@@ -132,49 +128,75 @@ if st.button("Generate Schedule"):
             materials_json = json.loads(materials_output)
 
             materials_df = pd.DataFrame([
-                {
-                    "task": item["task"],
-                    "materials": "; ".join(item.get("materials") or ["[Add materials]"])
-                }
+                {"task": item["task"], "materials": "; ".join(item["materials"]) if item["materials"] else "[Add materials]"}
                 for item in materials_json
             ])
             st.session_state.materials_data = materials_df
 
         except Exception as e:
-            st.error(f"Failed to parse: {e}")
+            st.error(f"Failed to parse schedule: {e}")
 
+# Display
 if st.session_state.schedule_data is not None:
-    st.subheader("Schedule Preview")
-    edited_df = st.data_editor(st.session_state.schedule_data, num_rows="dynamic")
+    st.success("Schedule successfully generated!")
+
+    st.subheader("Preview & Edit Schedule")
+    edited_df = st.data_editor(
+        st.session_state.schedule_data.copy(),
+        num_rows="dynamic",
+        use_container_width=True,
+        key="editable_table"
+    )
 
     st.subheader("Gantt Chart")
     try:
-        edited_df["Start"] = pd.to_datetime(edited_df["start_date"], errors="coerce")
-        edited_df["End"] = pd.to_datetime(edited_df["end_date"], errors="coerce")
-        fig = px.timeline(edited_df, x_start="Start", x_end="End", y="tasks", color="week")
-        fig.update_yaxes(autorange="reversed")
-        st.plotly_chart(fig, use_container_width=True)
-    except:
-        st.warning("Couldn't render chart.")
+        edited_df['Start'] = pd.to_datetime(edited_df['start_date'], errors='coerce')
+        edited_df['End'] = pd.to_datetime(edited_df['end_date'], errors='coerce')
+        gantt_fig = px.timeline(
+            edited_df,
+            x_start="Start",
+            x_end="End",
+            y="tasks",
+            color="week",
+            height=600
+        )
+        gantt_fig.update_yaxes(autorange="reversed", title=None)
+        gantt_fig.update_layout(margin=dict(l=50, r=50, t=30, b=30))
+        st.plotly_chart(gantt_fig, use_container_width=True)
+    except Exception as e:
+        st.warning("Could not generate Gantt chart.")
 
-    # Materials
+    st.subheader("Materials Order Preview")
     if st.session_state.materials_data is not None:
-        st.subheader("Materials Order Preview")
-        st.data_editor(st.session_state.materials_data, num_rows="dynamic")
-        mat_csv = st.session_state.materials_data.to_csv(index=False).encode("utf-8")
-        st.download_button("Download Materials CSV", mat_csv, "materials_list.csv")
+        edited_materials_df = st.data_editor(
+            st.session_state.materials_data.copy(),
+            num_rows="dynamic",
+            use_container_width=True,
+            key="editable_materials"
+        )
+        materials_csv = edited_materials_df.to_csv(index=False).encode("utf-8")
+        st.download_button("Download Materials List (CSV)", materials_csv, "materials_list.csv", "text/csv")
 
-    # Download schedule CSV
+    st.subheader("Estimated Build Cost")
+    st.write(f"**Estimated Cost:** ${st.session_state.estimated_cost:,.2f}")
+    st.caption("This is an AI-generated rough estimate. Please confirm with your contractor.")
+
+    # CSV Export
     csv = edited_df.to_csv(index=False).encode("utf-8")
-    st.download_button("Download Schedule CSV", csv, "schedule.csv")
+    st.download_button("Download Schedule (CSV)", csv, "schedule.csv", "text/csv")
 
     # PDF Export
-    def create_pdf(dataframe):
+    def create_pdf(dataframe, cost_estimate):
         buffer = BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=letter)
         styles = getSampleStyleSheet()
         elements = []
 
+        # Title
+        elements.append(Paragraph("AI Construction Schedule (Beta)", styles['Title']))
+        elements.append(Spacer(1, 12))
+
+        # Table
         table_data = [list(dataframe.columns)] + dataframe.values.tolist()
         table = Table(table_data)
         style = TableStyle([
@@ -182,20 +204,28 @@ if st.session_state.schedule_data is not None:
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
             ("ALIGN", (0, 0), (-1, -1), "CENTER"),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("BOTTOMPADDING", (0, 0), (-1, 0), 12),
             ("BACKGROUND", (0, 1), (-1, -1), colors.beige),
             ("GRID", (0, 0), (-1, -1), 1, colors.black),
         ])
         table.setStyle(style)
         elements.append(table)
+
+        # Estimated Cost
         elements.append(Spacer(1, 12))
-        elements.append(Paragraph("\u2B1B AI-generated schedule. Please confirm with your contractor.", styles["Normal"]))
+        cost_paragraph = Paragraph(
+            f"Estimated Build Cost: ${cost_estimate:,.2f} <br/><i>(AI generated. Confirm with your GC or estimator.)</i>",
+            styles["Normal"]
+        )
+        elements.append(cost_paragraph)
 
         doc.build(elements)
         buffer.seek(0)
         return buffer
 
-    pdf_buffer = create_pdf(edited_df)
-    st.download_button("Download PDF", pdf_buffer, "schedule.pdf", mime="application/pdf")
+    pdf_buffer = create_pdf(edited_df, st.session_state.estimated_cost)
+    st.download_button("Download Schedule (PDF)", pdf_buffer, file_name="schedule.pdf", mime="application/pdf")
+
 
 
 
