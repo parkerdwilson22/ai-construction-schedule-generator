@@ -228,20 +228,18 @@ if st.session_state.schedule_data is not None:
     pdf_buffer = create_pdf(edited_df, st.session_state.estimated_cost)
     st.download_button("Download Schedule (PDF)", pdf_buffer, file_name="schedule.pdf", mime="application/pdf")
 
-      with st.form("email_form"):
-        email = st.text_input("Recipient Email")
-        subject = st.text_input("Subject", value="Your AI Construction Schedule")
-        message = st.text_area("Message", value="Attached is your AI-generated construction schedule.")
-        send = st.form_submit_button("Send Email")
+    with st.form("email_form"):
+    email = st.text_input("Recipient Email")
+    subject = st.text_input("Subject", value="Your AI Construction Schedule")
+    message = st.text_area("Message", value="Attached is your AI-generated construction schedule.")
+    send = st.form_submit_button("Send Email")
 
-        if send:
-            try:
-                send_email(email, subject, message, pdf_buffer)
-                st.success("✅ Email sent successfully.")
-            except Exception as e:
-                st.error(f"❌ Failed to send email: {e}")
-
-
+    if send:
+        try:
+            send_email(email, subject, message, pdf_buffer)
+            st.success("✅ Email sent successfully.")
+        except Exception as e:
+            st.error(f"❌ Failed to send email: {e}")
 
 
 def send_email_with_pdf(to_email, pdf_buffer):
