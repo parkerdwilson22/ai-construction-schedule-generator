@@ -236,10 +236,10 @@ if st.session_state.schedule_data is not None:
 
     if send:
         try:
-            send_email(email, subject, message, pdf_buffer)
-            st.success("✅ Email sent successfully.")
-        except Exception as e:
-            st.error(f"❌ Failed to send email: {e}")
+        send_email(email, subject, message, pdf_buffer)
+        st.success("✅ Email sent successfully.")
+    except Exception as e:
+        st.error(f"❌ Failed to send email: {e}")
 
 
 
