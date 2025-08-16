@@ -135,7 +135,7 @@ if st.button("Generate Schedule"):
             st.session_state.estimated_cost = estimated_cost
 
             progress.progress(100)
-            st.success("✅ Schedule & Cost estimate generated!")
+            st.success("Schedule & Cost estimate generated!")
 
             st.markdown(f"""
                 <div style="background-color:#f0f2f6; padding:10px; border-radius:6px; margin-top:10px;">
@@ -146,7 +146,7 @@ if st.button("Generate Schedule"):
 
 # Display & Export
 if st.session_state.schedule_data is not None:
-    st.subheader("📅 Preview & Edit Schedule")
+    st.subheader("Preview & Edit Schedule")
     edited_df = st.data_editor(
         st.session_state.schedule_data.copy(),
         num_rows="dynamic",
@@ -154,7 +154,7 @@ if st.session_state.schedule_data is not None:
         key="editable_table"
     )
 
-    st.subheader("📊 Gantt Chart")
+    st.subheader("Gantt Chart")
     try:
         edited_df['Start'] = pd.to_datetime(edited_df['start_date'], errors='coerce')
         edited_df['End'] = pd.to_datetime(edited_df['end_date'], errors='coerce')
@@ -183,7 +183,7 @@ if st.session_state.schedule_data is not None:
         )
 
         st.download_button(
-            "⬇️ Download Materials (CSV)",
+            "Download Materials (CSV)",
             edited_materials_df.to_csv(index=False).encode("utf-8"),
             "materials.csv",
             "text/csv"
@@ -192,7 +192,7 @@ if st.session_state.schedule_data is not None:
     # Schedule Export
     csv = edited_df.to_csv(index=False).encode("utf-8")
     st.download_button(
-        "⬇️ Download Schedule (CSV)",
+        "Download Schedule (CSV)",
         csv,
         "schedule.csv",
         "text/csv"
@@ -236,14 +236,14 @@ if st.session_state.schedule_data is not None:
 
     pdf_buffer = create_pdf(edited_df, st.session_state.estimated_cost)
     st.download_button(
-        "⬇️ Download PDF",
+        "Download PDF",
         pdf_buffer,
         file_name="schedule.pdf",
         mime="application/pdf"
     )
 
     # Send Email Button
-    if st.button("📧 Send Email"):
+    if st.button("Send Email"):
         if not email:
             st.warning("Please enter recipient email.")
         else:
@@ -259,9 +259,9 @@ if st.session_state.schedule_data is not None:
                     smtp.login(st.secrets["EMAIL_ADDRESS"], st.secrets["EMAIL_PASSWORD"])
                     smtp.send_message(msg)
 
-                st.success("✅ Email sent successfully.")
+                st.success("Email sent successfully.")
             except Exception as e:
-                st.error(f"❌ Failed to send email: {e}")
+                st.error(f"Failed to send email: {e}")
 
 
 
