@@ -30,7 +30,7 @@ Do not repeat them later. Return the schedule in strict JSON format like this:
 [
   {{
     "week": 1,
-    "date_range": "2025-06-01 to 2025-06-07",
+    "date_range": "6-1-2025 to 6-7-2025",
     "tasks": ["Excavate site", "Set up perimeter fencing"]
   }},
   ...
